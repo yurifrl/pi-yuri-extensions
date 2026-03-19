@@ -1,0 +1,42 @@
+{
+  "extensions": {
+    "agent-chain": false,
+    "agent-team": false,
+    "cross-agent": false,
+    "damage-control": false,
+    "minimal": false,
+    "pi-pi": false,
+    "confirm-notify": true,
+    "yu-notify": false,
+    "pure-focus": false,
+    "purpose-gate": false,
+    "session-replay": false,
+    "subagent-widget": false,
+    "system-select": false,
+    "theme-cycler": false,
+    "tilldone": false,
+    "tool-counter": false,
+    "tool-counter-widget": false,
+    "what": true
+  },
+  "bump": 2,
+  "notify": {
+    "backend": "notifier",
+    "oscProtocol": "auto",
+    "agent": "Pi",
+    "presets": {
+      "stop": {
+        "title": "✅ {agent}",
+        "body": "{session} › {tab}"
+      },
+      "waiting": {
+        "title": "⏳ {agent}",
+        "body": "{session} › {tab}"
+      },
+      "subagent-stop": {
+        "title": "🔴 {agent}",
+        "body": "{session} › {tab}"
+      }
+    }
+  }
+}
