@@ -24,6 +24,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   what: () => import("./modules/what.ts"),
   "subagent-widget": () => import("./modules/subagent-widget.ts"),
   tilldone: () => import("./modules/tilldone.ts"),
+  "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
   "theme-cycler": () => import("./modules/theme-cycler.ts"),
   "system-select": () => import("./modules/system-select.ts"),
   "session-replay": () => import("./modules/session-replay.ts"),
@@ -33,6 +34,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "agent-chain": () => import("./modules/agent-chain.ts"),
   "pi-pi": () => import("./modules/pi-pi.ts"),
   "confirm-notify": () => import("./modules/confirm-notify.ts"),
+  "custom-footer": () => import("./modules/custom-footer.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
