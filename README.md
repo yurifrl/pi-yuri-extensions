@@ -127,3 +127,6 @@ Enable the `what` module in `.pi/extensions/pi-my-extensions.json` (or `~/.pi/ag
   - themes
   - skills
   - damage-control rules
+
+# References
+- [pi-vs-claude-code](https://github.com/disler/pi-vs-claude-code
