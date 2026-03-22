@@ -14,15 +14,8 @@ import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { applyExtensionDefaults } from "./themeMap.ts";
-import { wrapTextWithAnsi, visibleWidth } from "@mariozechner/pi-tui";
+import { wrapTextWithAnsi } from "@mariozechner/pi-tui";
 
-// --- Synthwave palette ---
-function bg(s: string): string {
-	return `\x1b[48;2;52;20;58m${s}\x1b[49m`;
-}
-function pink(s: string): string {
-	return `\x1b[38;2;255;126;219m${s}\x1b[39m`;
-}
 function cyan(s: string): string {
 	return `\x1b[38;2;54;249;246m${s}\x1b[39m`;
 }
@@ -34,9 +27,6 @@ function yellow(s: string): string {
 }
 function dim(s: string): string {
 	return `\x1b[38;2;120;100;140m${s}\x1b[39m`;
-}
-function bold(s: string): string {
-	return `\x1b[1m${s}\x1b[22m`;
 }
 
 interface Discovered {
@@ -183,82 +173,45 @@ export default function (pi: ExtensionAPI) {
 
 		if (groups.length === 0) return;
 
-				// We delay slightly so it doesn't get instantly overwritten by system-select's default startup notify
-						setTimeout(() => {
+		setTimeout(() => {
 			if (!ctx.hasUI) return;
-			// Reduce max width slightly to ensure it never overflows and breaks the next line
-			const width = Math.min((process.stdout.columns || 80) - 4, 100); 
-			const pad = bg(" ".repeat(width));
-			const lines: string[] = [];
 
-			lines.push(""); // space from prev
-			
-			for (let i = 0; i < groups.length; i++) {
-				const g = groups[i];
+			const width = Math.max(40, Math.min((process.stdout.columns || 80) - 4, 100));
+			const detailWidth = Math.max(20, width - 12);
+			const lines: string[] = [dim("Cross-agent loaded:")];
 
-				// Title with counts
+			for (const g of groups) {
 				const counts: string[] = [];
-				if (g.skills.length) counts.push(yellow("(") + green(`${g.skills.length}`) + dim(` skill${g.skills.length > 1 ? "s" : ""}`) + yellow(")"));
-				if (g.commands.length) counts.push(yellow("(") + green(`${g.commands.length}`) + dim(` command${g.commands.length > 1 ? "s" : ""}`) + yellow(")"));
-				if (g.agents.length) counts.push(yellow("(") + green(`${g.agents.length}`) + dim(` agent${g.agents.length > 1 ? "s" : ""}`) + yellow(")"));
-				const countStr = counts.length ? "  " + counts.join(" ") : "";
-				lines.push(pink(bold(`  ${g.source}`)) + countStr);
+				if (g.skills.length) counts.push(yellow(`${g.skills.length}`) + dim(` skill${g.skills.length > 1 ? "s" : ""}`));
+				if (g.commands.length) counts.push(yellow(`${g.commands.length}`) + dim(` command${g.commands.length > 1 ? "s" : ""}`));
+				if (g.agents.length) counts.push(yellow(`${g.agents.length}`) + dim(` agent${g.agents.length > 1 ? "s" : ""}`));
 
-				// Build body content
-				const items: string[] = [];
+				const summary = counts.length > 0 ? dim(" — ") + counts.join(dim(", ")) : "";
+				lines.push(yellow(g.source) + summary);
+
 				if (g.commands.length) {
-					items.push(
-						yellow("/") +
-						g.commands.map((c) => cyan(c.name)).join(yellow(", /"))
-					);
+					const body = yellow("/") + g.commands.map((c) => cyan(c.name)).join(yellow(", /"));
+					const wrapped = wrapTextWithAnsi(body, detailWidth);
+					wrapped.forEach((line, index) => {
+						lines.push(dim(index === 0 ? "  commands: " : "            ") ) + line);
+					});
 				}
 				if (g.skills.length) {
-					items.push(
-						yellow("/skill:") +
-						g.skills.map((s) => cyan(s)).join(yellow(", /skill:"))
-					);
+					const body = yellow("/skill:") + g.skills.map((s) => cyan(s)).join(yellow(", /skill:"));
+					const wrapped = wrapTextWithAnsi(body, detailWidth);
+					wrapped.forEach((line, index) => {
+						lines.push(dim(index === 0 ? "  skills:   " : "            ") ) + line);
+					});
 				}
 				if (g.agents.length) {
-					items.push(
-						yellow("@") +
-						g.agents.map((a) => green(a.name)).join(yellow(", @"))
-					);
+					const body = yellow("@") + g.agents.map((a) => green(a.name)).join(yellow(", @"));
+					const wrapped = wrapTextWithAnsi(body, detailWidth);
+					wrapped.forEach((line, index) => {
+						lines.push(dim(index === 0 ? "  agents:   " : "            ") ) + line);
+					});
 				}
-
-				const body = items.join("\n");
-				
-				// Top padding
-				lines.push(pad);
-
-				// Wrap body text, cap at 3 rows
-				const maxRows = 3;
-				const innerWidth = width - 4;
-				const wrapped = wrapTextWithAnsi(body, innerWidth);
-				const totalItems = g.commands.length + g.skills.length + g.agents.length;
-				const shown = wrapped.slice(0, maxRows);
-
-				for (const wline of shown) {
-					const vis = visibleWidth(wline);
-					const fill = Math.max(0, width - vis - 4);
-					lines.push(bg("  " + wline + " ".repeat(fill) + "  "));
-				}
-
-				if (wrapped.length > maxRows) {
-					const overflow = dim(`  ... ${totalItems - 15 > 0 ? totalItems - 15 : "more"} more`);
-					const oVis = visibleWidth(overflow);
-					const oFill = Math.max(0, width - oVis - 2);
-					lines.push(bg(overflow + " ".repeat(oFill) + "  "));
-				}
-
-				// Bottom padding
-				lines.push(pad);
-
-				// Spacing between groups
-				if (i < groups.length - 1) lines.push("");
 			}
-			
-			// We send it as "info" which forces it to be a raw text element in the chat 
-			// without the widget container, but preserving all our ANSI colors!
+
 			ctx.ui.notify(lines.join("\n"), "info");
 		}, 100);
 	});
