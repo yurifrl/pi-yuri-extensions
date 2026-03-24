@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { readPiYuConfigFile } from "../config.ts";
+import { readPiYuConfigFile } from "./lib/config.ts";
 
 type PresetConfig = {
   title: string;
