@@ -77,6 +77,7 @@ Notes:
 - `agent-loop`
 - `agent-team`
 - `agents-mcp-loader`
+- `checkpoint`
 - `confirm-notify`
 - `cross-agent`
 - `damage-control`
@@ -115,6 +116,16 @@ Enable the `what` module in `.pi/extensions/pi-my-extensions.json` (or `~/.pi/ag
 
 - `/what` opens a Pi prompt browser UI with numbered, truncated previews
 - `/what <number>` opens that full prompt directly from the current session history
+
+If you enable the `checkpoint` module, you also get:
+
+```bash
+/checkpoint
+/checkpoint --compact
+```
+
+`/checkpoint` is implemented by the extension as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`.
+It resolves the current Pi session from extension context (`ctx.sessionManager`) with a filesystem fallback, then sends a structured user message telling Pi to run the workflow from `~/.agents/skills/ag:checkpoint/SKILL.md` while injecting the real Pi session id as the change id and requiring session save/name/purpose output.
 
 ## Notes
 

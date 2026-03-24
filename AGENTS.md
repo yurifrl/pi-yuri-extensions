@@ -11,3 +11,20 @@
 
 If a command requires SSO/OAuth token refresh, **stop and tell the user** to refresh it themselves, then retry the original command. Do NOT attempt to run the login flow from within pi.
 
+## Extension Setup
+
+Extensions from this project must be enabled globally in `~/.pi/agent/settings.json` under the `packages` array. Add a local source entry pointing to this repo and use `+`/`!` prefixes to control which extension modules are loaded:
+
+```json
+{
+  "source": "/Users/yuri/Workdir/Yuri/pi-my-extensions",
+  "extensions": [
+    "!extensions/modules/*",
+    "+extensions/modules/agents-mcp-loader.ts",
+    "+extensions/modules/agent-loop.ts"
+  ]
+}
+```
+
+The `!extensions/modules/*` line disables all modules by default, then individual `+` lines opt in specific ones. The main entry point (`extensions/pi-my-extensions.ts`) and its always-on commands (`/update`, `/pi-my-extensions`) are loaded automatically.
+

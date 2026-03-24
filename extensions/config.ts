@@ -4,6 +4,19 @@ import { homedir } from "node:os";
 
 export const PI_YU_CONFIG_FILENAME = "pi-my-extensions.json";
 
+export type PiYuConfig = {
+	extensions?: Record<string, boolean>;
+	crossAgent?: {
+		allowlist?: string[];
+		verbose?: boolean;
+		recursiveDepth?: {
+			skills?: number;
+			agents?: number;
+			commands?: number;
+		};
+	};
+};
+
 function uniquePaths(paths: string[]): string[] {
 	return Array.from(new Set(paths));
 }
@@ -41,5 +54,16 @@ export async function readPiYuConfigFile(cwd: string): Promise<{ configPath: str
 		};
 	} catch {
 		return { configPath };
+	}
+}
+
+export async function readPiYuConfig(cwd: string): Promise<{ configPath: string; config: PiYuConfig }> {
+	const { configPath, content } = await readPiYuConfigFile(cwd);
+	if (!content) return { configPath, config: {} };
+
+	try {
+		return { configPath, config: JSON.parse(content) as PiYuConfig };
+	} catch {
+		return { configPath, config: {} };
 	}
 }
