@@ -35,6 +35,8 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "pi-pi": () => import("./modules/pi-pi.ts"),
   "confirm-notify": () => import("./modules/confirm-notify.ts"),
   "custom-footer": () => import("./modules/custom-footer.ts"),
+  checkpoint: () => import("./modules/checkpoint.ts"),
+  update: () => import("./modules/update.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
