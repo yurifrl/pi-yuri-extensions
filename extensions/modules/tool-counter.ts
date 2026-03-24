@@ -14,7 +14,7 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { basename } from "node:path";
-import { applyExtensionDefaults } from "./themeMap.ts";
+import { applyExtensionDefaults } from "./lib/themeMap.ts";
 
 export default function (pi: ExtensionAPI) {
 	const counts: Record<string, number> = {};

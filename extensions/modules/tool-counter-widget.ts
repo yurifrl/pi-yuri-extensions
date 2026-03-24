@@ -9,7 +9,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Box, Text } from "@mariozechner/pi-tui";
-import { applyExtensionDefaults } from "./themeMap.ts";
+import { applyExtensionDefaults } from "./lib/themeMap.ts";
 
 const palette = [
 	[12, 40, 80],    // deep navy

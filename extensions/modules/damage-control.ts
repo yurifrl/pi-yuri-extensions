@@ -4,7 +4,7 @@ import { parse as yamlParse } from "yaml";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { applyExtensionDefaults } from "./themeMap.ts";
+import { applyExtensionDefaults } from "./lib/themeMap.ts";
 
 interface Rule {
 	pattern: string;
