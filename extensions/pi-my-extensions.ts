@@ -36,7 +36,9 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "confirm-notify": () => import("./modules/confirm-notify.ts"),
   "custom-footer": () => import("./modules/custom-footer.ts"),
   checkpoint: () => import("./modules/checkpoint.ts"),
+  "guardrails-notify": () => import("./modules/guardrails-notify.ts"),
   update: () => import("./modules/update.ts"),
+  "copy-slack": () => import("./modules/copy-slack.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
