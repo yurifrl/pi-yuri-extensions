@@ -2,6 +2,35 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
 
+function cyan(s: string): string {
+  return `\x1b[38;2;54;249;246m${s}\x1b[39m`;
+}
+function yellow(s: string): string {
+  return `\x1b[38;2;254;222;93m${s}\x1b[39m`;
+}
+function dim(s: string): string {
+  return `\x1b[38;2;120;100;140m${s}\x1b[39m`;
+}
+
+interface LoadedSource {
+  relPath: string;
+  serverNames: string[];
+}
+
+function renderNotification(sources: LoadedSource[]): string {
+  const lines: string[] = [];
+
+  lines.push(yellow("[MCP servers]"));
+  for (const src of sources) {
+    lines.push(`  ${dim(src.relPath)}`);
+    for (const name of src.serverNames) {
+      lines.push(`      ${cyan(name)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 /**
  * Loads MCP server configs from common project-level config files
  * into .pi/mcp.json so pi-mcp-adapter picks them up on session start.
@@ -16,6 +45,8 @@ import { join, relative } from "node:path";
  * Existing .pi/mcp.json entries always win on conflict.
  */
 export default function (pi: ExtensionAPI) {
+  let pendingNotification: { sources: LoadedSource[] } | null = null;
+
   pi.on("session_directory", async (event) => {
     const sources = [
       join(event.cwd, ".agents", "mcp.json"),
@@ -27,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 
     // Collect servers from each source (later entries override earlier)
     let mergedSourceServers: Record<string, unknown> = {};
-    const loaded: string[] = [];
+    const loadedSources: LoadedSource[] = [];
 
     for (const sourcePath of sources) {
       if (!existsSync(sourcePath)) continue;
@@ -46,7 +77,7 @@ export default function (pi: ExtensionAPI) {
       if (!servers || typeof servers !== "object") continue;
 
       const names = Object.keys(servers);
-      loaded.push(`${relative(event.cwd, sourcePath)} (${names.join(", ")})`);
+      loadedSources.push({ relPath: relative(event.cwd, sourcePath), serverNames: names });
       mergedSourceServers = { ...mergedSourceServers, ...servers };
     }
 
@@ -77,9 +108,18 @@ export default function (pi: ExtensionAPI) {
     mkdirSync(piDir, { recursive: true });
     writeFileSync(destPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 
-    for (const entry of loaded) {
-      pi.log(`✔ mcp-loader: loaded ${entry}`);
+    pendingNotification = { sources: loadedSources };
+  });
+
+  pi.on("session_start", async (_event, ctx) => {
+    if (!pendingNotification) return;
+    const { sources } = pendingNotification;
+    pendingNotification = null;
+
+    if (ctx.hasUI) {
+      setTimeout(() => {
+        ctx.ui.notify(renderNotification(sources), "info");
+      }, 100);
     }
-    pi.log(`✔ mcp-loader: wrote ${Object.keys(merged.mcpServers as object).length} server(s) to .pi/mcp.json`);
   });
 }
