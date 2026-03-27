@@ -1,10 +1,13 @@
 import { complete } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
+import { BorderedLoader, convertToLlm, isToolCallEventType, serializeConversation } from "@mariozechner/pi-coding-agent";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+
+/** Files touched by this agent during the session (write/edit tool calls). Used to scope git diff. */
+const touchedFiles = new Set<string>();
 
 function encodeCwdForPiSessionDir(cwd: string): string {
   const trimmed = cwd.replace(/^\/+|\/+$/g, "");
@@ -107,8 +110,9 @@ async function generateSessionMeta(ctx: any): Promise<{ shortName: string; descr
 
   const model = ctx.model;
   if (!model) throw new Error("No active model available");
-  const apiKey = await ctx.modelRegistry.getApiKey(model);
-  if (!apiKey) throw new Error(`No API key for ${model.provider}/${model.id}`);
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) throw new Error(`No API key for ${model.provider}/${model.id}: ${auth.error}`);
+  const { apiKey, headers } = auth;
 
   const recent = conversationText.length > 4000 ? conversationText.slice(-4000) : conversationText;
 
@@ -124,7 +128,7 @@ Line 2: A one-sentence description of what was built/done in this session. Natur
         timestamp: Date.now(),
       }],
     },
-    { apiKey, maxTokens: 120 },
+    { apiKey, headers, maxTokens: 120 },
   );
 
   const raw = response.content
@@ -168,6 +172,7 @@ function buildCheckpointPrompt(
   cwd: string,
   session: { sessionFile: string; sessionId: string },
   contextName: string,
+  touchedFiles: Set<string>,
 ): string {
   const compact = args.trim() === "--compact";
   const contextFile = path.join(cwd, ".agents", "contexts", `${contextName}.md`);
@@ -219,7 +224,15 @@ Goal first, skip minutiae, be concise.
 
 ## Phase 3 — Update changelog
 
-Run git log/status/diff to determine scope.
+${touchedFiles.size > 0
+    ? `This agent touched the following files during this session:
+${[...touchedFiles].map(f => `  - ${f}`).join("\n")}
+
+Run \`git diff -- ${[...touchedFiles].join(" ")}\` to see only this agent's changes.
+Also run \`git status -- ${[...touchedFiles].join(" ")}\` to catch untracked new files.
+Only include changes from those files in the changelog — do not describe changes to other files.`
+    : "Run git log/status/diff to determine scope."
+}
 
 CHANGELOG.md format:
 
@@ -264,6 +277,16 @@ Be concise across all phases.`;
 }
 
 export default function checkpoint(pi: ExtensionAPI) {
+  pi.on("tool_call", async (event, ctx) => {
+    if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
+      const filePath = event.input.path as string;
+      if (filePath) {
+        const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(ctx.cwd, filePath);
+        touchedFiles.add(resolved);
+      }
+    }
+  });
+
   pi.registerCommand("checkpoint", {
     description: "Save context, summary, and changelog with Pi session metadata",
     handler: async (args, ctx) => {
@@ -294,7 +317,7 @@ export default function checkpoint(pi: ExtensionAPI) {
 
         ctx.ui.notify(`Session saved: ${result.name}`, "success");
 
-        const prompt = buildCheckpointPrompt(args, cwd, session, result.name);
+        const prompt = buildCheckpointPrompt(args, cwd, session, result.name, touchedFiles);
 
         if (ctx.isIdle()) {
           pi.sendUserMessage(prompt);

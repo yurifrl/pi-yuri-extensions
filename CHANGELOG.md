@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-27 Checkpoint Touched-File Tracking and Pi API Fix
+- Session ID: c304db5b-6efe-4f3c-9b28-00e1607601d8
+- Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-Workdir-Yuri-pi-my-extensions--/2026-03-27T19-02-35-830Z_c304db5b-6efe-4f3c-9b28-00e1607601d8.jsonl
+- Session Name: 2026-03-27-1611-guardrails-slack-notifications
+- Context Name: 2026-03-27-1611-guardrails-slack-notifications
+
+### Changed
+- `extensions/modules/checkpoint.ts` — fixed `getApiKey` → `getApiKeyAndHeaders` (pi API update); now destructures `{ ok, apiKey, headers }` and passes headers to LLM call
+- `extensions/modules/checkpoint.ts` — added `touchedFiles: Set<string>` populated by listening to `write`/`edit` tool call events at module load; resolves relative paths via `ctx.cwd`
+- `extensions/modules/checkpoint.ts` — `buildCheckpointPrompt` now accepts `touchedFiles` param; scopes changelog diff instructions to only the files the agent touched in this session
+
+## 2026-03-27 Guardrails Cmux Notifications
+- Session ID: fbfdb7e6-4063-499a-a3f1-e67c01f732a6
+- Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-Workdir-Yuri-pi-my-extensions--/2026-03-27T03-26-42-243Z_fbfdb7e6-4063-499a-a3f1-e67c01f732a6.jsonl
+- Session Name: 2026-03-27-1128-guardrails-slack-notifications
+- Context Name: 2026-03-27-1128-guardrails-slack-notifications
+
+### Added
+- `extensions/modules/guardrails-notify.ts` — listens to `guardrails:dangerous` and `guardrails:blocked` events from `@aliou/pi-guardrails` and fires cmux notifications via `pi.exec("cmux", ["notify", ...])`
+
+### Changed
+- `~/.pi/agent/settings.json` — moved local extension source before `@aliou/pi-guardrails` in packages array to ensure correct `tool_call` handler registration order
+
 ## 2026-03-23 AI Session Naming and Cly Upsert Migration
 - Session ID: d821779b-b5b8-48b3-be74-aa075168c287
 - Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-Workdir-Yuri-pi-my-extensions--/2026-03-23T20-07-17-984Z_d821779b-b5b8-48b3-be74-aa075168c287.jsonl
