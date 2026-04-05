@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-/** Files touched by this agent during the session (write/edit tool calls). Used to scope git diff. */
+/** Files touched by this agent during the session (write/edit tool calls). Listed in checkpoint for changelog context. */
 const touchedFiles = new Set<string>();
 
 function encodeCwdForPiSessionDir(cwd: string): string {
@@ -145,14 +145,41 @@ Line 2: A one-sentence description of what was built/done in this session. Natur
   return { shortName, description };
 }
 
+/** Scan .agents/contexts/ for a file that already has this session_id in its frontmatter. */
+function findContextFileBySessionId(cwd: string, sessionId: string): { name: string; contextFile: string } | null {
+  const contextsDir = path.join(cwd, ".agents", "contexts");
+  if (!existsSync(contextsDir)) return null;
+  try {
+    const files = readdirSync(contextsDir).filter(f => f.endsWith(".md"));
+    for (const file of files) {
+      const fullPath = path.join(contextsDir, file);
+      const content = readFileSync(fullPath, "utf-8");
+      if (content.includes(`session_id: ${sessionId}`)) {
+        const name = file.replace(/\.md$/, "");
+        return { name, contextFile: fullPath };
+      }
+    }
+  } catch {}
+  return null;
+}
+
 async function findOrCreateContextName(ctx: any, sessionId: string): Promise<{ name: string; description: string }> {
   // In-memory cache: guarantees same name for repeat /checkpoint calls in same process
   const cached = resolvedNameCache.get(sessionId);
   if (cached) return cached;
 
-  const existing = findSessionInCly(sessionId);
-  if (existing) {
-    const result = { name: existing.name, description: existing.description || existing.name };
+  // Check if a context file already exists for this session (handles renamed/re-checkpointed sessions)
+  const cwd = ctx.cwd || process.cwd();
+  const existingContext = findContextFileBySessionId(cwd, sessionId);
+  if (existingContext) {
+    const result = { name: existingContext.name, description: existingContext.name };
+    resolvedNameCache.set(sessionId, result);
+    return result;
+  }
+
+  const existingCly = findSessionInCly(sessionId);
+  if (existingCly) {
+    const result = { name: existingCly.name, description: existingCly.description || existingCly.name };
     resolvedNameCache.set(sessionId, result);
     return result;
   }
@@ -217,21 +244,28 @@ Be specific: file paths not abstractions, include reasoning, no fluff.
 
 ## Phase 2 — Print summary
 
+This is the primary output the user reads — they ran /checkpoint because they need to understand what this session is about.
+
+Always write the summary as if explaining from scratch to someone who wasn't watching:
+- What problem or goal this session was working on
+- What was actually done (specific, not generic)
+- Current state: is it done, in progress, blocked?
+- Next steps if clear
+
 ${compact
-    ? "Single paragraph: goal + work + outcome."
-    : "Format: Goal, Work Done, Outcome, Key Decisions (if meaningful), Next Steps (if clear)."}
-Goal first, skip minutiae, be concise.
+    ? "Keep it to 3-4 sentences covering the above."
+    : "Use short paragraphs, not bullet lists. 100-200 words. Be specific — name files, commands, decisions. No filler phrases like 'successfully completed' or 'as requested'."}
 
 ## Phase 3 — Update changelog
 
+Write the changelog based on what you did in this session — not from git diffs. Do not run any git commands for this phase.
+
 ${touchedFiles.size > 0
-    ? `This agent touched the following files during this session:
+    ? `Files this agent wrote or edited during this session (for reference only):
 ${[...touchedFiles].map(f => `  - ${f}`).join("\n")}
 
-Run \`git diff -- ${[...touchedFiles].join(" ")}\` to see only this agent's changes.
-Also run \`git status -- ${[...touchedFiles].join(" ")}\` to catch untracked new files.
-Only include changes from those files in the changelog — do not describe changes to other files.`
-    : "Run git log/status/diff to determine scope."
+Describe what changed in these files based on your knowledge of what was done. Only include meaningful changes — no trivial edits, no reformatting, no file listing for its own sake.`
+    : "Describe what was built or changed based on your knowledge of this session's work."
 }
 
 CHANGELOG.md format:
@@ -250,6 +284,7 @@ CHANGELOG.md format:
 
 Title is a nice human-readable capitalized description, not a slug.
 Update existing session block in place, don't duplicate. Create CHANGELOG.md if missing.
+If the changelog already has an up-to-date entry for this session, write "Changelog: already up to date" — do not repeat the entry.
 Truthful, deduplicated, concise, no trivial changes.
 
 ## Final output shape
@@ -264,16 +299,14 @@ Session File: ${session.sessionFile}
 Resume: cly agent-session resume --provider pi ${contextName}
 ---
 
-## Summary
-...
+<the summary — always present, always explains what this session is about>
 
 ---
 
-## Changelog
-...
+Changelog: <"updated" with the new entry, or "already up to date">
 \`\`\`
 
-Be concise across all phases.`;
+Be concise. The summary is mandatory and must be self-contained.`;
 }
 
 export default function checkpoint(pi: ExtensionAPI) {
