@@ -93,7 +93,7 @@ async function loadEnabled(pi: ExtensionAPI, cwd: string): Promise<{ loaded: str
       }
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error(`[pi-my-extensions] failed to load module '${name}':`, error);
+      console.error(`[pi-extensions] failed to load module '${name}':`, error);
     }
   }
 
@@ -103,7 +103,7 @@ async function loadEnabled(pi: ExtensionAPI, cwd: string): Promise<{ loaded: str
 export default function piYu(pi: ExtensionAPI) {
   let initialized = false;
   let loadedModules: string[] = [];
-  let configPath = path.join(process.cwd(), ".pi", "extensions", "pi-my-extensions.json");
+  let configPath = path.join(process.cwd(), ".pi", "extensions", "pi-extensions.json");
 
   pi.on("session_start", async (_event, ctx) => {
     if (initialized) return;
@@ -114,14 +114,14 @@ export default function piYu(pi: ExtensionAPI) {
     configPath = loaded.configPath;
 
     const msg = loadedModules.length > 0
-      ? `pi-my-extensions loaded: ${loadedModules.join(", ")}`
-      : "pi-my-extensions loaded with no active modules (all off by default)";
+      ? `pi-extensions loaded: ${loadedModules.join(", ")}`
+      : "pi-extensions loaded with no active modules (all off by default)";
 
     ctx.ui.notify(msg, loadedModules.length > 0 ? "success" : "info");
   });
 
-  pi.registerCommand("pi-my-extensions", {
-    description: "Show pi-my-extensions module toggle status and config path",
+  pi.registerCommand("pi-extensions", {
+    description: "Show pi-extensions module toggle status and config path",
     handler: async (_args, ctx) => {
       const { config } = await readConfig(ctx.cwd);
       const rows = Object.keys(MODULE_LOADERS)
@@ -130,11 +130,11 @@ export default function piYu(pi: ExtensionAPI) {
         .join("\n");
 
       const loaded = loadedModules.length ? loadedModules.join(", ") : "(none)";
-      const text = `pi-my-extensions\n\nConfig: ${configPath}\n\nLoaded this session: ${loaded}\n\nToggles:\n${rows}`;
+      const text = `pi-extensions\n\nConfig: ${configPath}\n\nLoaded this session: ${loaded}\n\nToggles:\n${rows}`;
 
       // eslint-disable-next-line no-console
       console.log(text);
-      ctx.ui.notify(`pi-my-extensions status printed to terminal (${configPath})`, "info");
+      ctx.ui.notify(`pi-extensions status printed to terminal (${configPath})`, "info");
     },
   });
 }

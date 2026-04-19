@@ -1,10 +1,10 @@
 {
-  "name": "pi-my-extensions",
+  "name": "pi-extensions",
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Pi package: pi-my-extensions toggleable extension hub + zellij notifications",
-  "keywords": ["pi-package", "pi-my-extensions", "zellij", "notifications", "extensions"],
+  "description": "Pi package: pi-extensions toggleable extension hub + zellij notifications",
+  "keywords": ["pi-package", "pi-extensions", "zellij", "notifications", "extensions"],
   "dependencies": {
     "yaml": "^2.8.0"
   },

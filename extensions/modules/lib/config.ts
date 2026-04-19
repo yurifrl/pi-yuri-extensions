@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 
-export const PI_YU_CONFIG_FILENAME = "pi-my-extensions.json";
+export const PI_YU_CONFIG_FILENAME = "pi-extensions.json";
 
 export type PiYuConfig = {
 	extensions?: Record<string, boolean>;

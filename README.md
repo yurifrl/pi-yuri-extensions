@@ -1,11 +1,11 @@
-# pi-my-extensions
+# pi-extensions
 
 Your personal **pi package hub**.
 
-- Main extension name: **pi-my-extensions**
+- Main extension name: **pi-extensions**
 - All bundled extensions are **toggleable**
 - All toggles are **OFF by default**
-- Enable/disable modules in config: `.pi/extensions/pi-my-extensions.json` (project) or `~/.pi/agent/extensions/pi-my-extensions.json` (global)
+- Enable/disable modules in config: `.pi/extensions/pi-extensions.json` (project) or `~/.pi/agent/extensions/pi-extensions.json` (global)
 
 ## Install
 
@@ -18,13 +18,13 @@ pi install .
 
 ## How toggles work
 
-Only `extensions/pi-my-extensions.ts` is auto-loaded by pi.
+Only `extensions/pi-extensions.ts` is auto-loaded by pi.
 
-On `session_start`, `pi-my-extensions` reads config from:
+On `session_start`, `pi-extensions` reads config from:
 
-- project: `.pi/extensions/pi-my-extensions.json`
-- global: `~/.pi/agent/extensions/pi-my-extensions.json`
-- legacy fallback: `.pi/pi-my-extensions.json`
+- project: `.pi/extensions/pi-extensions.json`
+- global: `~/.pi/agent/extensions/pi-extensions.json`
+- legacy fallback: `.pi/pi-extensions.json`
 
 Project config takes precedence over global config when both exist.
 
@@ -46,7 +46,7 @@ Any omitted key defaults to `false`.
 
 ## Notification backend config (`yu-notify`)
 
-`yu-notify` supports configurable desktop notification transport via `.pi/extensions/pi-my-extensions.json` (project) or `~/.pi/agent/extensions/pi-my-extensions.json` (global):
+`yu-notify` supports configurable desktop notification transport via `.pi/extensions/pi-extensions.json` (project) or `~/.pi/agent/extensions/pi-extensions.json` (global):
 
 ```json
 {
@@ -100,12 +100,12 @@ Notes:
 Use:
 
 ```bash
-/pi-my-extensions
+/pi-extensions
 ```
 
 It prints current toggle status and config path.
 
-Enable the `what` module in `.pi/extensions/pi-my-extensions.json` (or `~/.pi/agent/extensions/pi-my-extensions.json` globally), then use:
+Enable the `what` module in `.pi/extensions/pi-extensions.json` (or `~/.pi/agent/extensions/pi-extensions.json` globally), then use:
 
 ```bash
 /what
