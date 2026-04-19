@@ -9,7 +9,7 @@
     "yaml": "^2.8.0"
   },
   "pi": {
-    "extensions": ["./extensions/modules"],
+    "extensions": ["./extensions/pi-extensions.ts"],
     "skills": ["./.pi/skills"]
   }
 }
