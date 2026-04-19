@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative } from "node:path";
 
 function cyan(s: string): string {
@@ -13,80 +14,67 @@ function dim(s: string): string {
 }
 
 interface LoadedSource {
-  relPath: string;
+  label: string;
   serverNames: string[];
 }
 
 function renderNotification(sources: LoadedSource[]): string {
   const lines: string[] = [];
-
-  lines.push(yellow("[MCP servers]"));
+  lines.push(yellow("[MCP servers from .agents]"));
   for (const src of sources) {
-    lines.push(`  ${dim(src.relPath)}`);
+    lines.push(`  ${dim(src.label)}`);
     for (const name of src.serverNames) {
       lines.push(`      ${cyan(name)}`);
     }
   }
-
   return lines.join("\n");
 }
 
 /**
- * Loads MCP server configs from common project-level config files
- * into .pi/mcp.json so pi-mcp-adapter picks them up on session start.
+ * Merges MCP servers from .agents/mcp.json (project) and ~/.agents/mcp.json (global)
+ * into ~/.pi/agent/mcp.json so pi-mcp-adapter picks them up.
  *
- * Sources (lowest → highest priority):
- *   .agents/mcp.json  — agents convention
- *   .kiro/settings/mcp.json — Kiro
- *   .cursor/mcp.json  — Cursor
- *   .vscode/mcp.json  — VS Code
- *   .mcp.json         — Claude Code / standard
- *
- * Existing .pi/mcp.json entries always win on conflict.
+ * Project .agents/mcp.json overrides ~/.agents/mcp.json.
+ * Existing ~/.pi/agent/mcp.json entries always win (never clobbered).
  */
 export default function (pi: ExtensionAPI) {
   let pendingNotification: { sources: LoadedSource[] } | null = null;
 
   pi.on("session_directory", async (event) => {
-    const sources = [
-      join(event.cwd, ".agents", "mcp.json"),
-      join(event.cwd, ".kiro", "settings", "mcp.json"),
-      join(event.cwd, ".cursor", "mcp.json"),
-      join(event.cwd, ".vscode", "mcp.json"),
-      join(event.cwd, ".mcp.json"),
+    const sources: { path: string; label: string }[] = [
+      { path: join(homedir(), ".agents", "mcp.json"), label: "~/.agents/mcp.json" },
+      { path: join(event.cwd, ".agents", "mcp.json"), label: ".agents/mcp.json" },
     ];
 
-    // Collect servers from each source (later entries override earlier)
-    let mergedSourceServers: Record<string, unknown> = {};
+    let mergedServers: Record<string, unknown> = {};
     const loadedSources: LoadedSource[] = [];
 
-    for (const sourcePath of sources) {
-      if (!existsSync(sourcePath)) continue;
+    for (const { path: srcPath, label } of sources) {
+      if (!existsSync(srcPath)) continue;
 
       let source: Record<string, unknown>;
       try {
-        source = JSON.parse(readFileSync(sourcePath, "utf-8"));
+        source = JSON.parse(readFileSync(srcPath, "utf-8"));
       } catch {
-        pi.log(`⚠ mcp-loader: failed to parse ${relative(event.cwd, sourcePath)}, skipping`);
+        pi.log(`⚠ mcp-loader: failed to parse ${label}, skipping`);
         continue;
       }
 
       const servers =
         (source.mcpServers ?? source["mcp-servers"] ?? {}) as Record<string, unknown>;
-
       if (!servers || typeof servers !== "object") continue;
 
       const names = Object.keys(servers);
-      loadedSources.push({ relPath: relative(event.cwd, sourcePath), serverNames: names });
-      mergedSourceServers = { ...mergedSourceServers, ...servers };
+      if (names.length === 0) continue;
+
+      loadedSources.push({ label, serverNames: names });
+      mergedServers = { ...mergedServers, ...servers };
     }
 
-    if (Object.keys(mergedSourceServers).length === 0) return;
+    if (Object.keys(mergedServers).length === 0) return;
 
-    const piDir = join(event.cwd, ".pi");
-    const destPath = join(piDir, "mcp.json");
+    const destPath = join(homedir(), ".pi", "agent", "mcp.json");
 
-    // Load existing .pi/mcp.json if present (non-generated entries win)
     let existing: Record<string, unknown> = { mcpServers: {} };
     if (existsSync(destPath)) {
       try {
@@ -100,12 +88,12 @@ export default function (pi: ExtensionAPI) {
     const merged = {
       ...existing,
       mcpServers: {
-        ...mergedSourceServers,
+        ...mergedServers,
         ...existingServers,
       },
     };
 
-    mkdirSync(piDir, { recursive: true });
+    mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
     writeFileSync(destPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 
     pendingNotification = { sources: loadedSources };

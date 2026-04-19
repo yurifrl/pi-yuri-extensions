@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-10 Session Summary Widget Above Editor
+- Session ID: 3053243f-d4b5-4738-892c-ca1f887f2b76
+- Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-Workdir-Yuri-pi-my-extensions--/2026-04-10T01-07-28-091Z_3053243f-d4b5-4738-892c-ca1f887f2b76.jsonl
+- Session Name: 2026-04-09-2243-checkpoint-context-management
+- Context Name: 2026-04-09-2243-checkpoint-context-management
+
+### Added
+- `extensions/modules/custom-footer.ts` — summary widget above the editor that reads `pi.getSessionName()` (set by pi-session-summary) and renders it with `◇` prefix; polls every 2s for 30s after each agent turn to catch async LLM updates
+- `extensions/modules/custom-footer.ts` — `/summary:widget` command accepting `on`, `off`, or no arg (toggle) to show/hide the widget
+
+### Changed
+- `~/.pi/agent/session-summary.json` — `showWidget` set to `false` so pi-session-summary doesn't render its own belowEditor widget (the custom-footer widget replaces it above the editor)
+
 ## 2026-03-27 Checkpoint Touched-File Tracking and Pi API Fix
 - Session ID: c304db5b-6efe-4f3c-9b28-00e1607601d8
 - Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-Workdir-Yuri-pi-my-extensions--/2026-03-27T19-02-35-830Z_c304db5b-6efe-4f3c-9b28-00e1607601d8.jsonl

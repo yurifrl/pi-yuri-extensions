@@ -3,6 +3,79 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth } from "@mariozechner/pi-tui";
 
 export default function (pi: ExtensionAPI) {
+	// -- Summary widget above editor (reads from pi-session-summary via session name) --
+	let summaryPollTimer: ReturnType<typeof setInterval> | null = null;
+	let lastDisplayedSummary = "";
+	let latestCtx: any = null;
+	let showSummary = true;
+
+	function updateSummaryWidget() {
+		if (!latestCtx?.hasUI) return;
+		if (!showSummary) {
+			latestCtx.ui.setWidget("summary-above", undefined);
+			return;
+		}
+		const name = pi.getSessionName();
+		if (name && name !== lastDisplayedSummary) {
+			lastDisplayedSummary = name;
+			latestCtx.ui.setWidget("summary-above", (_tui: any, theme: any) => {
+				return {
+					render: (width: number) => {
+						const truncated = truncateToWidth(name, width - 3);
+						return [theme.fg("dim", "◇ ") + theme.fg("muted", truncated)];
+					},
+					invalidate: () => {},
+				};
+			});
+		} else if (!name) {
+			lastDisplayedSummary = "";
+			latestCtx.ui.setWidget("summary-above", undefined);
+		}
+	}
+
+	function startSummaryPolling() {
+		if (summaryPollTimer) clearInterval(summaryPollTimer);
+		let checks = 0;
+		summaryPollTimer = setInterval(() => {
+			updateSummaryWidget();
+			if (++checks >= 15) {
+				clearInterval(summaryPollTimer!);
+				summaryPollTimer = null;
+			}
+		}, 2000);
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		latestCtx = ctx;
+		updateSummaryWidget();
+	});
+
+	pi.on("session_switch", async (_event, ctx) => {
+		latestCtx = ctx;
+		lastDisplayedSummary = "";
+		updateSummaryWidget();
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		latestCtx = ctx;
+		updateSummaryWidget();
+		startSummaryPolling();
+	});
+
+	pi.registerCommand("summary:widget", {
+		description: "Show or hide the session summary widget (on/off, no arg toggles)",
+		handler: async (args, ctx) => {
+			const arg = args.trim().toLowerCase();
+			if (arg === "on") showSummary = true;
+			else if (arg === "off") showSummary = false;
+			else showSummary = !showSummary;
+			latestCtx = ctx;
+			updateSummaryWidget();
+			ctx.ui.notify(`Summary widget ${showSummary ? "on" : "off"}`, "info");
+		},
+	});
+
+	// -- Custom footer --
 	pi.on("session_start", async (_event, ctx) => {
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			const unsub = footerData.onBranchChange(() => tui.requestRender());
