@@ -17,7 +17,7 @@ Extensions from this project must be enabled globally in `~/.pi/agent/settings.j
 
 ```json
 {
-  "source": "/Users/yuri/Workdir/Yuri/pi-extensions",
+  "source": "./extensions/pi-extensions",
   "extensions": [
     "!extensions/modules/*",
     "+extensions/modules/agents-mcp-loader.ts",

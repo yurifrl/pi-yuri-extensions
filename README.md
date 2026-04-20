@@ -138,6 +138,3 @@ It resolves the current Pi session from extension context (`ctx.sessionManager`)
   - themes
   - skills
   - damage-control rules
-
-# References
-- [pi-vs-claude-code](https://github.com/disler/pi-vs-claude-code

@@ -21,7 +21,6 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "purpose-gate": () => import("./modules/purpose-gate.ts"),
   "tool-counter": () => import("./modules/tool-counter.ts"),
   "tool-counter-widget": () => import("./modules/tool-counter-widget.ts"),
-  what: () => import("./modules/what.ts"),
   "subagent-widget": () => import("./modules/subagent-widget.ts"),
   tilldone: () => import("./modules/tilldone.ts"),
   "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
@@ -39,6 +38,9 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "guardrails-notify": () => import("./modules/guardrails-notify.ts"),
   update: () => import("./modules/update.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
+  draft: () => import("./modules/draft.ts"),
+  "session-print": () => import("./modules/session-print.ts"),
+  gastown: () => import("./modules/gastown.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
