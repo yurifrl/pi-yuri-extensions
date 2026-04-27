@@ -100,13 +100,88 @@ async function safeExec(
   }
 }
 
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, dirname } from "node:path";
+import { spawn } from "node:child_process";
+
+const GT_CACHE_PATH = join(homedir(), ".cache", "pi-extensions", "gastown.json");
+const GT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+type GtCache = {
+  gtAvailable?: boolean;
+  gtAvailableAt?: number;
+  workspaces?: Record<string, { hasWorkspace: boolean; at: number }>;
+};
+
+function readGtCache(): GtCache {
+  try {
+    if (!existsSync(GT_CACHE_PATH)) return {};
+    const raw = readFileSync(GT_CACHE_PATH, "utf8");
+    return JSON.parse(raw) as GtCache;
+  } catch {
+    return {};
+  }
+}
+
+function writeGtCache(next: GtCache): void {
+  try {
+    mkdirSync(dirname(GT_CACHE_PATH), { recursive: true });
+    writeFileSync(GT_CACHE_PATH, JSON.stringify(next));
+  } catch {
+    // best-effort cache; ignore failures
+  }
+}
+
+function getCachedGtAvailable(): boolean | undefined {
+  const c = readGtCache();
+  if (c.gtAvailable === undefined || !c.gtAvailableAt) return undefined;
+  if (Date.now() - c.gtAvailableAt > GT_CACHE_TTL_MS) return undefined;
+  return c.gtAvailable;
+}
+
+function setCachedGtAvailable(val: boolean): void {
+  const c = readGtCache();
+  writeGtCache({ ...c, gtAvailable: val, gtAvailableAt: Date.now() });
+}
+
+function getCachedWorkspace(cwd: string): boolean | undefined {
+  const c = readGtCache();
+  const entry = c.workspaces?.[cwd];
+  if (!entry) return undefined;
+  if (Date.now() - entry.at > GT_CACHE_TTL_MS) return undefined;
+  return entry.hasWorkspace;
+}
+
+function setCachedWorkspace(cwd: string, hasWorkspace: boolean): void {
+  const c = readGtCache();
+  const workspaces = { ...(c.workspaces || {}), [cwd]: { hasWorkspace, at: Date.now() } };
+  writeGtCache({ ...c, workspaces });
+}
+
 let gtAvailable: boolean | null = null;
 async function isGtAvailable(execFn: ExtensionAPI["exec"], cfg: Config): Promise<boolean> {
   if (gtAvailable !== null) return gtAvailable;
+  const cached = getCachedGtAvailable();
+  if (cached !== undefined) {
+    gtAvailable = cached;
+    return gtAvailable;
+  }
   const res = await safeExec(execFn, cfg, "gt", ["--version"]);
   gtAvailable = res !== null;
+  setCachedGtAvailable(gtAvailable);
   if (!gtAvailable) log(cfg, "gt binary not found; gastown extension disabled for this session");
   return gtAvailable;
+}
+
+// Detached fire-and-forget spawn — returns immediately, child lives on.
+function spawnDetached(cmd: string, args: string[]): void {
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+    child.unref();
+  } catch {
+    // ignore
+  }
 }
 
 async function gastownPrime(execFn: ExtensionAPI["exec"], cfg: Config): Promise<string> {
@@ -138,12 +213,23 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.on("session_start", async (_event, ctx) => {
-    cfg = await loadConfig(ctx.cwd?.() ?? process.cwd());
+    const cwd = (typeof ctx.cwd === "string" ? ctx.cwd : (ctx as any).cwd?.()) ?? process.cwd();
+    cfg = await loadConfig(cwd);
     if (!cfg.hooks.sessionStart) return;
     if (!(await isGtAvailable(pi.exec, cfg))) return;
 
+    // Short-circuit when we've already confirmed there's no workspace at this cwd.
+    if (getCachedWorkspace(cwd) === false) {
+      log(cfg, `session_start: cached no-workspace for ${cwd}, skipping`);
+      return;
+    }
+
     const primeText = await gastownPrime(pi.exec, cfg);
-    if (!primeText) return;
+    if (!primeText) {
+      setCachedWorkspace(cwd, false);
+      return;
+    }
+    setCachedWorkspace(cwd, true);
 
     const mailText = await getMail();
     const content = mailText ? `${primeText}\n\n${mailText}` : primeText;
@@ -187,9 +273,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (!cfg.hooks.sessionShutdown) return;
+    // Only record costs when running as an autonomous gastown role (inside a rig).
+    if (!cfg.role || !isAutonomousRole(cfg.role)) return;
     if (!(await isGtAvailable(pi.exec, cfg))) return;
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (!sessionId) return;
-    await safeExec(pi.exec, cfg, "gt", ["costs", "record", "--session", sessionId]);
+    // Fire-and-forget so shutdown doesn't block on gt.
+    spawnDetached("gt", ["costs", "record", "--session", sessionId]);
   });
 }

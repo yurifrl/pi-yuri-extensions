@@ -1,6 +1,9 @@
 /**
  * Cross-Agent — Load commands, skills, and agents from other AI coding agents
  *
+ * Originally adapted from disler/pi-vs-claude-code:extensions/cross-agent.ts
+ * (https://github.com/disler/pi-vs-claude-code). Modified for this fork.
+ *
  * By default this auto-loads from local .agents, local .claude, and ~/.agents.
  * Additional sources can be allowlisted via config.
  */

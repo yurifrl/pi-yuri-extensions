@@ -35,6 +35,7 @@ export default function (pi: ExtensionAPI) {
 
 	function startSummaryPolling() {
 		if (summaryPollTimer) clearInterval(summaryPollTimer);
+		if (!latestCtx?.hasUI) return;
 		let checks = 0;
 		summaryPollTimer = setInterval(() => {
 			updateSummaryWidget();
@@ -43,6 +44,7 @@ export default function (pi: ExtensionAPI) {
 				summaryPollTimer = null;
 			}
 		}, 2000);
+		summaryPollTimer?.unref?.();
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -76,7 +78,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// -- Custom footer --
-	pi.on("session_start", async (_event, ctx) => {
+	let footerCtx: any = null;
+	function installFooter(ctx: any) {
+		footerCtx = ctx;
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			const unsub = footerData.onBranchChange(() => tui.requestRender());
 
@@ -84,8 +88,11 @@ export default function (pi: ExtensionAPI) {
 				dispose() { unsub(); },
 				invalidate() {},
 				render(width: number): string[] {
+					const active = footerCtx;
+					if (!active) return [""];
 					let input = 0, output = 0, cost = 0;
-					for (const e of ctx.sessionManager.getBranch()) {
+					try {
+					for (const e of active.sessionManager.getBranch()) {
 						if (e.type === "message" && e.message.role === "assistant") {
 							const m = e.message as AssistantMessage;
 							input += m.usage.input;
@@ -94,7 +101,9 @@ export default function (pi: ExtensionAPI) {
 						}
 					}
 
-					const usage = ctx.getContextUsage();
+					} catch { return [""]; }
+					let usage: any;
+					try { usage = active.getContextUsage(); } catch { return [""]; }
 					const pct = usage?.percent ?? 0;
 					const pctColor = pct > 75 ? "error" : pct > 50 ? "warning" : "success";
 
@@ -118,7 +127,7 @@ export default function (pi: ExtensionAPI) {
 
 					const thinking = pi.getThinkingLevel();
 					const thinkColor = thinking === "high" ? "warning" : thinking === "medium" ? "accent" : thinking === "low" ? "dim" : "muted";
-					const modelId = ctx.model?.id || "no-model";
+					const modelId = active.model?.id || "no-model";
 					const modelStr = theme.fg(thinkColor, "◆") + " " + theme.fg("accent", modelId);
 
 					const sep = theme.fg("dim", " | ");
@@ -130,5 +139,7 @@ export default function (pi: ExtensionAPI) {
 				},
 			};
 		});
-	});
+	}
+	pi.on("session_start", async (_event, ctx) => { installFooter(ctx); });
+	pi.on("session_switch", async (_event, ctx) => { footerCtx = ctx; });
 }
