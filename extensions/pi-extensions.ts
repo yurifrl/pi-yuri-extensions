@@ -13,25 +13,10 @@ type ToggleConfig = {
 };
 
 const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
-  "agent-loop": () => import("./modules/agent-loop.ts"),
   "agents-mcp-loader": () => import("./modules/agents-mcp-loader.ts"),
   "yu-notify": () => import("./modules/yu-notify.ts"),
-  minimal: () => import("./modules/minimal.ts"),
-  "pure-focus": () => import("./modules/pure-focus.ts"),
-  "purpose-gate": () => import("./modules/purpose-gate.ts"),
-  "tool-counter": () => import("./modules/tool-counter.ts"),
-  "tool-counter-widget": () => import("./modules/tool-counter-widget.ts"),
-  "subagent-widget": () => import("./modules/subagent-widget.ts"),
-  tilldone: () => import("./modules/tilldone.ts"),
   "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
-  "theme-cycler": () => import("./modules/theme-cycler.ts"),
-  "system-select": () => import("./modules/system-select.ts"),
-  "session-replay": () => import("./modules/session-replay.ts"),
-  "damage-control": () => import("./modules/damage-control.ts"),
   "cross-agent": () => import("./modules/cross-agent.ts"),
-  "agent-team": () => import("./modules/agent-team.ts"),
-  "agent-chain": () => import("./modules/agent-chain.ts"),
-  "pi-pi": () => import("./modules/pi-pi.ts"),
   "confirm-notify": () => import("./modules/confirm-notify.ts"),
   "custom-footer": () => import("./modules/custom-footer.ts"),
   checkpoint: () => import("./modules/checkpoint.ts"),
@@ -39,8 +24,10 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   update: () => import("./modules/update.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
   draft: () => import("./modules/draft.ts"),
-  "session-print": () => import("./modules/session-print.ts"),
+  "greetings": () => import("./modules/greetings.ts"),
   gastown: () => import("./modules/gastown.ts"),
+  "aws-login": () => import("./modules/aws-login.ts"),
+  memwatch: () => import("./modules/memwatch.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
@@ -111,7 +98,7 @@ export default function piYu(pi: ExtensionAPI) {
     if (initialized) return;
     initialized = true;
 
-    const loaded = await loadEnabled(pi, ctx.cwd);
+    const loaded = await loadEnabled(pi, typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd);
     loadedModules = loaded.loaded;
     configPath = loaded.configPath;
 
@@ -125,7 +112,7 @@ export default function piYu(pi: ExtensionAPI) {
   pi.registerCommand("pi-extensions", {
     description: "Show pi-extensions module toggle status and config path",
     handler: async (_args, ctx) => {
-      const { config } = await readConfig(ctx.cwd);
+      const { config } = await readConfig(typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd);
       const rows = Object.keys(MODULE_LOADERS)
         .sort()
         .map((name) => `${config.extensions?.[name] ? "ON " : "OFF"}  ${name}`)
