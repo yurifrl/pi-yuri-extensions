@@ -83,7 +83,9 @@ Notes:
 - `damage-control`
 - `minimal`
 - `pi-pi`
+- `greetings`
 - `yu-notify`
+- `idle-watch`
 - `pure-focus`
 - `purpose-gate`
 - `session-replay`
@@ -126,6 +128,104 @@ If you enable the `checkpoint` module, you also get:
 
 `/checkpoint` is implemented by the extension as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`.
 It resolves the current Pi session from extension context (`ctx.sessionManager`) with a filesystem fallback, then sends a structured user message telling Pi to run the workflow from `~/.agents/skills/ag:checkpoint/SKILL.md` while injecting the real Pi session id as the change id and requiring session save/name/purpose output.
+
+## Idle watcher (`idle-watch`)
+
+Detects when pi has been in the same session state for too long and fires a cmux notification:
+
+- **working** too long — pi has been churning on a turn for longer than the threshold (stuck tool, runaway loop, slow LLM).
+- **idle** too long — pi finished working long ago and no new prompt arrived (user walked away).
+
+Detection uses `ctx.isIdle()` (equivalent to the TUI "Working..." indicator) by default; events (`agent_start`/`agent_end`) are opt-in as a second signal.
+
+### Config
+
+Add an `idle-watch` block to `.pi/extensions/pi-extensions.json` (project) or `~/.pi/agent/extensions/pi-extensions.json` (global):
+
+```json
+{
+  "extensions": { "idle-watch": true },
+  "idle-watch": {
+    "enabled": true,
+    "tickSeconds": 30,
+    "detection": { "events": false, "workingIndicator": true },
+    "states": {
+      "working": { "enabled": true, "threshold": "10m", "backoff": false },
+      "idle":    { "enabled": true, "threshold": "15m", "backoff": false }
+    },
+    "heartbeat": { "enabled": true, "path": "~/.pi/state/idle-{pid}.json" }
+  }
+}
+```
+
+`backoff` values per state:
+
+- `false` (default) — fire once when threshold crosses, silent until state changes.
+- `true` — use default schedule `["5m", "15m", "30m"]`.
+- array of duration strings — custom schedule, values are gaps *between* notifications.
+
+### Notification templates
+
+Each state accepts optional `title` and `body` templates. If unset, sensible defaults are used. Available tokens:
+
+- `{state}` — `working` or `idle`
+- `{elapsed}` — formatted duration (e.g. `12m30s`)
+- `{sessionName}` — result of `pi.getSessionName()` (the `◇ ...` summary line), empty if unset
+- `{cwd}` — working directory
+- `{pid}` — pi process pid
+
+Example: include the session summary in the body so you can tell sessions apart from the notification alone.
+
+```json
+"idle-watch": {
+  "states": {
+    "working": {
+      "title": "⏳ {sessionName}",
+      "body":  "working for {elapsed}"
+    },
+    "idle": {
+      "title": "💤 {sessionName}",
+      "body":  "idle for {elapsed} — come back?"
+    }
+  }
+}
+```
+
+### `/idle` command
+
+All overrides are session-only (wiped on pi restart):
+
+```
+/idle                              status + effective config
+/idle on | off                     enable / disable this session
+/idle working <dur>                override working threshold
+/idle idle <dur>                   override idle threshold
+/idle backoff on | off             toggle backoff for both states
+/idle backoff <state> on|off|<csv> per-state backoff, e.g. /idle backoff working 2m,5m,15m
+/idle reset                        clear fire counters
+```
+
+### Heartbeat
+
+When `heartbeat.enabled` is true, the module writes `~/.pi/state/idle-{pid}.json` on every transition and tick:
+
+```json
+{
+  "pid": 12345,
+  "session": "zellij-session-or-unknown",
+  "cwd": "/path",
+  "state": "idle",
+  "enteredStateAt": 1735582123000,
+  "lastTickAt": 1735582153000,
+  "cleanExit": false
+}
+```
+
+External watchers (cron, fish function, supervisor) can detect a hung pi with the heuristic:
+
+```
+now - lastTickAt > tickSeconds * 3  &&  !cleanExit
+```
 
 ## Notes
 
