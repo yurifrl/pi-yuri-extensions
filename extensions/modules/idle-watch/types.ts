@@ -24,23 +24,56 @@ export interface StateConfig {
 	body?: string;
 }
 
-export interface DetectionConfig {
-	/** Listen to agent_start / agent_end events to drive state transitions. */
-	events: boolean;
-	/** Poll ctx.isIdle() on every tick; reconciles tracker on mismatch. */
-	workingIndicator: boolean;
+/**
+ * Detection mode — single-choice string.
+ *   - "polling" (default): ctx.isIdle() is ground truth. agent_* events ignored.
+ *   - "events":            agent_start / agent_end drive transitions. poll ignored.
+ *   - "hybrid":            events drive transitions; poll reconciles only after
+ *                          N consecutive ticks of disagreement (hybridDebounceTicks).
+ */
+export type DetectionMode = "events" | "polling" | "hybrid";
+
+/**
+ * Legacy shape — retained only so `translateDetection()` can accept old
+ * `pi-extensions.json` blocks and translate them to a DetectionMode string.
+ * New configs should use the string form.
+ */
+export interface LegacyDetectionConfig {
+	events?: boolean;
+	workingIndicator?: boolean;
 }
 
 export interface HeartbeatConfig {
 	enabled: boolean;
 	/** Path template; `{pid}` is replaced with process.pid. */
 	path: string;
+	/**
+	 * Write the heartbeat file at most every Nth tick when nothing else forces
+	 * a write (transition, fire, shutdown, or payload change). Default 4.
+	 */
+	everyNTicks: number;
 }
 
 export interface IdleWatchConfig {
 	enabled: boolean;
 	tickSeconds: number;
-	detection: DetectionConfig;
+	/**
+	 * Seconds after each `session_start` during which notification firing is
+	 * suppressed. State tracking continues. 0 disables the grace window.
+	 */
+	startupGraceSeconds: number;
+	/**
+	 * When true (default), `enteredStateAt` is reset to the moment the grace
+	 * window ends, so thresholds count from grace-end rather than session-start.
+	 */
+	resetThresholdAfterGrace: boolean;
+	detection: DetectionMode;
+	/**
+	 * Only used when detection mode is "hybrid". Number of consecutive ticks
+	 * the poll value must disagree with the event-driven state before the
+	 * poll wins. Default 2.
+	 */
+	hybridDebounceTicks: number;
 	states: {
 		working: StateConfig;
 		idle: StateConfig;
@@ -62,12 +95,15 @@ export interface Tracker {
 /**
  * Session-only overrides built by `/idle` subcommands. Partial shape of
  * IdleWatchConfig — any field present overrides the file config layer.
- * Nested partials for states/detection/heartbeat.
+ * Nested partials for states/heartbeat.
  */
 export interface SessionOverrides {
 	enabled?: boolean;
 	tickSeconds?: number;
-	detection?: Partial<DetectionConfig>;
+	startupGraceSeconds?: number;
+	resetThresholdAfterGrace?: boolean;
+	detection?: DetectionMode;
+	hybridDebounceTicks?: number;
 	states?: {
 		working?: Partial<StateConfig>;
 		idle?: Partial<StateConfig>;
