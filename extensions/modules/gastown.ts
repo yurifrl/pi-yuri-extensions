@@ -198,9 +198,38 @@ function isAutonomousRole(role: string): boolean {
   return AUTONOMOUS_ROLES.has(role.toLowerCase());
 }
 
+async function gastownStatus(
+  execFn: ExtensionAPI["exec"],
+  cfg: Config,
+  args: string[],
+): Promise<string> {
+  const res = await safeExec(execFn, cfg, "gt", ["status", ...args]);
+  if (!res) return "gastown: `gt status` timed out or failed to run";
+  const out = [res.stdout?.trim(), res.stderr?.trim()].filter(Boolean).join("\n\n");
+  return out || "gastown: `gt status` returned no output";
+}
+
 export default function (pi: ExtensionAPI) {
   let cfg: Config = DEFAULTS;
   let lastPrimeText = "";
+
+  pi.registerCommand("gastown:status", {
+    description: "Show Gas Town status (`gt status`); pass extra args as flags",
+    handler: async (args, ctx) => {
+      const cwd = (typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd) ?? process.cwd();
+      cfg = await loadConfig(cwd);
+      if (!(await isGtAvailable(pi.exec, cfg))) {
+        ctx.ui?.notify?.("gastown: `gt` binary not found", "error");
+        return;
+      }
+      const extra = args.trim().length > 0 ? args.trim().split(/\s+/) : [];
+      const content = await gastownStatus(pi.exec, cfg, extra);
+      pi.sendMessage(
+        { customType: GASTOWN_MESSAGE_TYPE, content, display: true },
+        { deliverAs: "followUp", triggerTurn: false },
+      );
+    },
+  });
   // Cache mail text captured at session_start so before_agent_start doesn't refetch.
   let cachedMail: { text: string; at: number } | null = null;
   const MAIL_CACHE_MS = 5000;
