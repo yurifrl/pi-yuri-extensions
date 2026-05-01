@@ -17,10 +17,9 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "yu-notify": () => import("./modules/yu-notify.ts"),
   "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
   "cross-agent": () => import("./modules/cross-agent.ts"),
-  "confirm-notify": () => import("./modules/confirm-notify.ts"),
   "custom-footer": () => import("./modules/custom-footer.ts"),
   checkpoint: () => import("./modules/checkpoint.ts"),
-  "guardrails-notify": () => import("./modules/guardrails-notify.ts"),
+  "supplemental-notifications": () => import("./modules/supplemental-notifications.ts"),
   update: () => import("./modules/update.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
   draft: () => import("./modules/draft.ts"),
@@ -28,6 +27,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   gastown: () => import("./modules/gastown.ts"),
   "aws-login": () => import("./modules/aws-login.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
+  "idle-watch": () => import("./modules/idle-watch/index.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
