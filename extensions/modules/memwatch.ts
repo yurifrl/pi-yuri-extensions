@@ -1,41 +1,44 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
+import { push as cmuxPush, dismiss as cmuxDismiss, dismissSync as cmuxDismissSync } from "./lib/cmuxNotify.ts";
 
 /**
- * memwatch — periodic per-session memory check.
+ * memwatch — periodic per-session pi memory check, surfaced via cmux notifications.
  *
- * Runs every N minutes (default 15). Queries macOS `memory_pressure` and
- * this pi process's own RSS via `ps`. If free RAM drops below the threshold,
- * surfaces a notification inside the pi session via ctx.ui.notify().
+ * Watches THIS pi process's RSS (not system free). Two tiers:
+ *   - warn  (⚠️ orange)  when RSS ≥ warnMB
+ *   - critical (🚨 red)  when RSS ≥ criticalMB
  *
- * Light: no timers are created until session_start fires, and both child
- * processes (memory_pressure, ps) have hard timeouts + are detached so they
- * never block the event loop.
+ * Every N minutes (default 15):
+ *   - If RSS under warnMB → dismiss our own notification if we have one.
+ *   - If RSS ≥ warnMB   → post cmux notification titled `memwatch:<pid>`.
+ *   - On escalation warn→critical, replace the existing notification.
+ *   - Per-id clear via `cmux rpc notification.clear {"id":"..."}` — no cross-session bleed.
+ *   - Best-effort dismiss on `session_shutdown` and process exit.
  *
- * Config (optional, under `memwatch` in pi-extensions.json):
+ * Config (pi-extensions.json):
  *   {
  *     "memwatch": {
  *       "intervalMinutes": 15,
- *       "thresholdPercent": 20,
- *       "criticalPercent": 10,
- *       "ownRssWarnMB": 1500
+ *       "warnMB": 1500,
+ *       "criticalMB": 3000
  *     }
  *   }
  */
 
 type MemwatchConfig = {
   intervalMinutes?: number;
-  thresholdPercent?: number;
-  criticalPercent?: number;
-  ownRssWarnMB?: number;
+  warnMB?: number;
+  criticalMB?: number;
 };
 
 const DEFAULTS = {
   intervalMinutes: 15,
-  thresholdPercent: 20,
-  criticalPercent: 10,
-  ownRssWarnMB: 1500,
+  warnMB: 1500,
+  criticalMB: 3000,
 };
+
+const NOTIF_TITLE = `memwatch:${process.pid}`;
 
 function run(cmd: string, args: string[], timeoutMs = 4000): Promise<string> {
   return new Promise((resolve) => {
@@ -61,12 +64,6 @@ function run(cmd: string, args: string[], timeoutMs = 4000): Promise<string> {
   });
 }
 
-async function readFreePercent(): Promise<number> {
-  const out = await run("memory_pressure", []);
-  const m = out.match(/System-wide memory free percentage:\s*(\d+)/);
-  return m ? parseInt(m[1], 10) : -1;
-}
-
 async function readOwnRssKB(pid: number): Promise<number> {
   const out = await run("ps", ["-o", "rss=", "-p", String(pid)]);
   const n = parseInt(out.trim(), 10);
@@ -84,59 +81,62 @@ function loadConfig(ctx: any): Required<MemwatchConfig> {
     const cfg = (ctx?.config?.extensions?.memwatch ?? ctx?.config?.memwatch ?? {}) as MemwatchConfig;
     return {
       intervalMinutes: cfg.intervalMinutes ?? DEFAULTS.intervalMinutes,
-      thresholdPercent: cfg.thresholdPercent ?? DEFAULTS.thresholdPercent,
-      criticalPercent: cfg.criticalPercent ?? DEFAULTS.criticalPercent,
-      ownRssWarnMB: cfg.ownRssWarnMB ?? DEFAULTS.ownRssWarnMB,
+      warnMB: cfg.warnMB ?? DEFAULTS.warnMB,
+      criticalMB: cfg.criticalMB ?? DEFAULTS.criticalMB,
     };
   } catch {
     return { ...DEFAULTS };
   }
 }
 
-function notify(ctx: any, msg: string, level: "info" | "success" | "error"): void {
-  try {
-    ctx?.ui?.notify?.(msg, level);
-  } catch {}
-}
-
 export default function memwatch(pi: ExtensionAPI): void {
   let timer: ReturnType<typeof setInterval> | null = null;
-  let lastAlertLevel: "none" | "warn" | "critical" = "none";
+  let currentNotifId: string | null = null;
+  let lastLevel: "none" | "warn" | "critical" = "none";
   let ctxRef: any = null;
 
   const tick = async (): Promise<void> => {
     if (!ctxRef) return;
     const cfg = loadConfig(ctxRef);
 
-    const [freePct, ownRss] = await Promise.all([
-      readFreePercent(),
-      readOwnRssKB(process.pid),
-    ]);
-
+    const ownRss = await readOwnRssKB(process.pid);
     const ownMB = ownRss > 0 ? Math.round(ownRss / 1024) : -1;
-    let level: "none" | "warn" | "critical" = "none";
-    if (freePct >= 0 && freePct <= cfg.criticalPercent) level = "critical";
-    else if (freePct >= 0 && freePct <= cfg.thresholdPercent) level = "warn";
-    else if (ownMB >= cfg.ownRssWarnMB) level = "warn";
 
-    // De-dupe: only notify on escalation, or once per level transition.
-    const escalated =
-      (lastAlertLevel === "none" && level !== "none") ||
-      (lastAlertLevel === "warn" && level === "critical");
-    if (!escalated) {
-      // allow clearing state on recovery
-      if (level === "none") lastAlertLevel = "none";
+    let level: "none" | "warn" | "critical" = "none";
+    if (ownMB >= 0 && ownMB >= cfg.criticalMB) level = "critical";
+    else if (ownMB >= 0 && ownMB >= cfg.warnMB) level = "warn";
+
+    if (level === "none") {
+      // Under threshold — always make sure our notification is gone.
+      if (currentNotifId) {
+        await cmuxDismiss(currentNotifId);
+        currentNotifId = null;
+      }
+      lastLevel = "none";
       return;
     }
 
+    // Build message.
     const emoji = level === "critical" ? "🚨" : "⚠️";
-    const parts: string[] = [];
-    if (freePct >= 0) parts.push(`system free: ${freePct}%`);
-    if (ownRss > 0) parts.push(`this pi: ${fmtMB(ownRss)}`);
-    const msg = `${emoji} memwatch — ${parts.join(" | ")}`;
+    const subtitle = `${emoji} pi RAM ${fmtMB(ownRss)}`;
+    const body =
+      level === "critical"
+        ? `pi process using ${fmtMB(ownRss)} (≥ ${cfg.criticalMB} MB critical)`
+        : `pi process using ${fmtMB(ownRss)} (≥ ${cfg.warnMB} MB warn)`;
 
-    notify(ctxRef, msg, level === "critical" ? "error" : "info");
-    lastAlertLevel = level;
+    // Replace on escalation, or if we don't currently have one.
+    const escalated =
+      (lastLevel === "none" && level !== "none") ||
+      (lastLevel === "warn" && level === "critical");
+
+    if (escalated || !currentNotifId) {
+      if (currentNotifId) {
+        await cmuxDismiss(currentNotifId);
+        currentNotifId = null;
+      }
+      currentNotifId = await cmuxPush({ title: NOTIF_TITLE, subtitle, body });
+    }
+    lastLevel = level;
   };
 
   pi.on("session_start", async (_event, ctx) => {
@@ -150,17 +150,43 @@ export default function memwatch(pi: ExtensionAPI): void {
     try {
       (timer as any)?.unref?.();
     } catch {}
-    // Fire one check shortly after startup (don't block session_start).
+    // Fire one check ~5s after startup (don't block session_start).
     const kickoff = setTimeout(() => void tick().catch(() => {}), 5000);
     try {
       (kickoff as any)?.unref?.();
     } catch {}
   });
 
-  pi.on("session_end", async () => {
+  pi.on("session_shutdown", async () => {
     if (timer) {
       clearInterval(timer);
       timer = null;
     }
+    if (currentNotifId) {
+      cmuxDismissSync(currentNotifId);
+      currentNotifId = null;
+    }
+  });
+
+  // Extra safety: also try on node exit (covers paths that skip session_shutdown).
+  process.on("exit", () => {
+    if (currentNotifId) cmuxDismissSync(currentNotifId);
+  });
+
+  pi.registerCommand?.("memwatch:clear", {
+    description: "Dismiss this pi's memwatch notification immediately",
+    handler: async (_args: string, ctx: any) => {
+      if (currentNotifId) {
+        await cmuxDismiss(currentNotifId);
+        currentNotifId = null;
+      }
+      lastLevel = "none";
+      try { ctx?.ui?.notify?.("memwatch cleared", "info"); } catch {}
+    },
+  });
+
+  pi.registerCommand?.("memwatch:check", {
+    description: "Run a memwatch tick now",
+    handler: async () => { await tick(); },
   });
 }
