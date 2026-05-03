@@ -27,7 +27,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   gastown: () => import("./modules/gastown.ts"),
   "aws-login": () => import("./modules/aws-login.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
-  "idle-watch": () => import("./modules/idle-watch/index.ts"),
+  "idle-watch": () => import("./modules/idle-watch.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
