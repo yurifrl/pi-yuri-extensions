@@ -26,6 +26,9 @@
  *   {elapsed}   human duration, e.g. "12m30s"
  *   {threshold} the configured threshold string, e.g. "10m"
  *   {name}      cmux/zellij tab/session name (from env)
+ *   {surface}   cmux surface title (full, raw), or pid fallback — disambiguates
+ *               multiple pi sessions sharing the same workspace/tab name so
+ *               push()'s title-match lookup doesn't grab another session's id
  *   {summary}   pi.getSessionName() — the "◇ …" session summary
  *   {cwd}       short cwd, last 2 path segments
  *   {cwdFull}   full absolute cwd
@@ -74,16 +77,20 @@ interface Config {
 
 const DEFAULT_TEMPLATES: { working: Template; idle: Template } = {
 	working: {
-		title: "{emoji} {name}",
+		title: "{emoji} {name} · {surface}",
 		subtitle: "working for [{elapsed}]",
 		body: "{summary}",
 	},
 	idle: {
-		title: "{emoji} {name}",
+		title: "{emoji} {name} · {surface}",
 		subtitle: "idle for [{elapsed}]",
 		body: "{summary}",
 	},
 };
+
+// Note: surface title is passed through raw; macOS / cmux UI handle visual
+// truncation. Disambiguation works as long as the full title is used in
+// push()'s list-notifications match.
 
 const DEFAULTS: Config = {
 	enabled: true,
@@ -210,6 +217,8 @@ function envSessionName(): string {
 
 // Cached once at session_start. Empty if cmux not available / resolve failed.
 let workspaceTitle = "";
+// Cached once at session_start. Falls back to `:<pid>` so it is always non-empty.
+let surfaceTitle = "";
 
 interface CmuxWorkspace {
 	id?: string;
@@ -233,6 +242,46 @@ async function resolveWorkspaceTitle(pi: ExtensionAPI): Promise<string> {
 	}
 }
 
+interface CmuxSurface {
+	id?: string;
+	title?: string;
+}
+
+/**
+ * Resolve the current pi's cmux surface title for notification disambiguation.
+ *
+ * Two pi sessions running in the same workspace/tab would otherwise share the
+ * same notification title template ("{emoji} {name}") — `push()` matches by
+ * title when looking up the id of the notification it just posted, so session
+ * A could grab session B's id and later dismiss B's notification on its own
+ * state transition. Appending the full surface title (unique per cmux surface)
+ * breaks that collision.
+ *
+ * Returned raw — OS handles visual truncation. Falls back to `:<pid>` only
+ * when CMUX_SURFACE_ID is unset or the RPC fails, so collision avoidance is
+ * still guaranteed off-cmux.
+ */
+async function resolveSurfaceTitle(pi: ExtensionAPI): Promise<string> {
+	const surfaceId = process.env.CMUX_SURFACE_ID?.trim();
+	const wsId = process.env.CMUX_WORKSPACE_ID?.trim();
+	const pidFallback = `:${process.pid}`;
+	if (!surfaceId || !wsId) return pidFallback;
+	try {
+		const res = (await pi.exec(
+			"cmux",
+			["rpc", "surface.list", JSON.stringify({ workspace_id: wsId })],
+			{ timeout: 3000 },
+		)) as { stdout?: string };
+		if (!res?.stdout) return pidFallback;
+		const parsed = JSON.parse(res.stdout) as { surfaces?: CmuxSurface[] };
+		const hit = parsed.surfaces?.find((s) => s.id === surfaceId);
+		const raw = (hit?.title ?? "").trim();
+		return raw || pidFallback;
+	} catch {
+		return pidFallback;
+	}
+}
+
 function shortCwd(cwd: string): string {
 	const parts = cwd.split("/").filter(Boolean);
 	return parts.length > 2 ? parts.slice(-2).join("/") : cwd;
@@ -251,6 +300,7 @@ function buildVars(pi: ExtensionAPI, state: PiState, elapsedMs: number, threshol
 		threshold,
 		name: envSessionName() || ws || "pi",
 		workspace: ws,
+		surface: surfaceTitle,
 		summary,
 		cwd: shortCwd(cwd),
 		cwdFull: cwd,
@@ -400,7 +450,7 @@ async function fire(s: PiState, elapsed: number, threshold: string): Promise<voi
 	const body = render(tmpl.body, vars) || render("{state} for {elapsed}", vars);
 
 	try {
-		const id = await cmuxPush({ title, body }, piRef);
+		const id = await cmuxPush({ title, subtitle, body }, piRef);
 		if (id) activeNotif[s] = id;
 	} catch {}
 }
@@ -520,8 +570,12 @@ export default function idleWatch(pi: ExtensionAPI): void {
 
 		config = await loadConfig(cwdRef);
 
-		// Resolve cmux workspace title once per session for use in notification templates.
+		// Resolve cmux workspace + surface titles once per session for use in
+		// notification templates. Surface title disambiguates multiple pi sessions
+		// running inside the same workspace so their notifications don't collide
+		// in push()'s title-match lookup.
 		workspaceTitle = await resolveWorkspaceTitle(pi);
+		surfaceTitle = await resolveSurfaceTitle(pi);
 
 		// Seed initial state from ctx.isIdle() so the first tick is accurate.
 		const observed = pollIsIdle();
