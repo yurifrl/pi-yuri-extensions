@@ -107,11 +107,11 @@ export default function memwatch(pi: ExtensionAPI): void {
     else if (ownMB >= 0 && ownMB >= cfg.warnMB) level = "warn";
 
     if (level === "none") {
-      // Under threshold — always make sure our notification is gone.
-      if (currentNotifId) {
-        await cmuxDismiss(currentNotifId);
-        currentNotifId = null;
-      }
+      // AUTO-DISMISS DISABLED (investigating vanishing notifications)
+      // if (currentNotifId) {
+      //   await cmuxDismiss(currentNotifId);
+      //   currentNotifId = null;
+      // }
       lastLevel = "none";
       return;
     }
@@ -130,10 +130,11 @@ export default function memwatch(pi: ExtensionAPI): void {
       (lastLevel === "warn" && level === "critical");
 
     if (escalated || !currentNotifId) {
-      if (currentNotifId) {
-        await cmuxDismiss(currentNotifId);
-        currentNotifId = null;
-      }
+      // AUTO-DISMISS DISABLED (investigating vanishing notifications)
+      // if (currentNotifId) {
+      //   await cmuxDismiss(currentNotifId);
+      //   currentNotifId = null;
+      // }
       currentNotifId = await cmuxPush({ title: NOTIF_TITLE, subtitle, body });
     }
     lastLevel = level;
@@ -162,24 +163,26 @@ export default function memwatch(pi: ExtensionAPI): void {
       clearInterval(timer);
       timer = null;
     }
-    if (currentNotifId) {
-      cmuxDismissSync(currentNotifId);
-      currentNotifId = null;
-    }
+    // AUTO-DISMISS DISABLED (investigating vanishing notifications)
+    // if (currentNotifId) {
+    //   cmuxDismissSync(currentNotifId);
+    //   currentNotifId = null;
+    // }
   });
 
-  // Extra safety: also try on node exit (covers paths that skip session_shutdown).
-  process.on("exit", () => {
-    if (currentNotifId) cmuxDismissSync(currentNotifId);
-  });
+  // AUTO-DISMISS DISABLED (investigating vanishing notifications)
+  // process.on("exit", () => {
+  //   if (currentNotifId) cmuxDismissSync(currentNotifId);
+  // });
 
   pi.registerCommand?.("memwatch:clear", {
     description: "Dismiss this pi's memwatch notification immediately",
     handler: async (_args: string, ctx: any) => {
-      if (currentNotifId) {
-        await cmuxDismiss(currentNotifId);
-        currentNotifId = null;
-      }
+      // AUTO-DISMISS DISABLED (investigating vanishing notifications)
+      // if (currentNotifId) {
+      //   await cmuxDismiss(currentNotifId);
+      //   currentNotifId = null;
+      // }
       lastLevel = "none";
       try { ctx?.ui?.notify?.("memwatch cleared", "info"); } catch {}
     },
