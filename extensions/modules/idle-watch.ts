@@ -3,10 +3,17 @@
  *
  * Two rules:
  *   1. User idle (no input) for more than `idle` duration → fire once.
- *   2. Pi working (churning on a turn) for more than `working` duration → fire once.
+ *   2. Pi stuck on the current step (no new turn_start/turn_end or
+ *      tool_execution_start/end events) for more than `working` duration
+ *      while still in the working state → fire once.
+ *
+ * The working threshold measures *silence within a working run*, not total
+ * working duration. A busy run that keeps emitting turn/tool events keeps
+ * resetting the timer and will never trip. A wedged tool (network hang,
+ * runaway subagent, stuck shell) trips it naturally.
  *
  * Also: no fires during `graceSeconds` after session_start, so a fresh pi
- * doesn't blast you with a "working" notification within 30 seconds of boot.
+ * doesn't blast you with a "stuck" notification within 30 seconds of boot.
  *
  * Everything dies with the process. No disk writes, no external watchers,
  * no event plumbing — `ctx.isIdle()` every tick is the ground truth.
@@ -16,7 +23,8 @@
  *   tickSeconds    number    default 30
  *   graceSeconds   number    default 300 — suppress fires for N seconds after
  *                            session_start; elapsed time still tracked
- *   working        string    default "10m" — threshold for working alerts
+ *   working        string    default "10m" — threshold for stuck alerts
+ *                            (time since last turn/tool event while working)
  *   idle           string    default "15m" — threshold for idle alerts
  *   templates      object    per-state title/subtitle/body template overrides
  *
@@ -78,7 +86,7 @@ interface Config {
 const DEFAULT_TEMPLATES: { working: Template; idle: Template } = {
 	working: {
 		title: "{emoji} {name} · {surface}",
-		subtitle: "working for [{elapsed}]",
+		subtitle: "stuck on current step for [{elapsed}]",
 		body: "{summary}",
 	},
 	idle: {
@@ -323,6 +331,10 @@ let piRef: ExtensionAPI | null = null;
 
 let state: PiState = "idle";
 let enteredAt = Date.now();
+// Last time we observed activity (turn/tool start or end) while working.
+// The working threshold is measured against max(enteredAt, lastActivityAt)
+// so busy runs keep resetting the clock and only genuine stalls fire.
+let lastActivityAt = Date.now();
 let bootAt = Date.now();
 const fired: Record<PiState, number> = { working: 0, idle: 0 };
 const lastFiredAt: Record<PiState, number | null> = { working: null, idle: null };
@@ -375,17 +387,18 @@ async function tick(): Promise<void> {
 			const prev = state;
 			state = next;
 			enteredAt = now;
+			lastActivityAt = now;
 			fired.working = 0;
 			fired.idle = 0;
 			lastFiredAt.working = null;
 			lastFiredAt.idle = null;
 			ackedState = null; // transitioning clears ack
-			// Dismiss the lingering notification from the outgoing state.
-			const toDismiss = activeNotif[prev];
-			if (toDismiss) {
-				activeNotif[prev] = null;
-				await cmuxDismiss(toDismiss).catch(() => {});
-			}
+			// AUTO-DISMISS DISABLED (investigating vanishing notifications)
+			// const toDismiss = activeNotif[prev];
+			// if (toDismiss) {
+			// 	activeNotif[prev] = null;
+			// 	await cmuxDismiss(toDismiss).catch(() => {});
+			// }
 		}
 
 	// Grace: track state but don't fire.
@@ -410,7 +423,11 @@ async function tick(): Promise<void> {
 		return;
 	}
 
-	const elapsed = now - enteredAt;
+	// For working: measure silence since last turn/tool event, floored at
+	// enteredAt (and grace-end, since enteredAt is snapped forward above).
+	// For idle: plain time-in-state.
+	const anchor = state === "working" ? Math.max(enteredAt, lastActivityAt) : enteredAt;
+	const elapsed = now - anchor;
 	if (elapsed < thresholdMs) return;
 
 	// Session-only suppressions.
@@ -460,13 +477,14 @@ function shutdown(): void {
 		clearInterval(timer);
 		timer = null;
 	}
-	for (const s of ["working", "idle"] as const) {
-		const id = activeNotif[s];
-		if (id) {
-			activeNotif[s] = null;
-			cmuxDismissSync(id);
-		}
-	}
+	// AUTO-DISMISS DISABLED (investigating vanishing notifications)
+	// for (const s of ["working", "idle"] as const) {
+	// 	const id = activeNotif[s];
+	// 	if (id) {
+	// 		activeNotif[s] = null;
+	// 		cmuxDismissSync(id);
+	// 	}
+	// }
 }
 
 // ─── /idle status + on/off ──────────────────────────────────────────────
@@ -567,6 +585,7 @@ export default function idleWatch(pi: ExtensionAPI): void {
 		workCount = 0;
 		turnsInFlight = 0;
 		inFlightTools.clear();
+		lastActivityAt = bootAt;
 
 		config = await loadConfig(cwdRef);
 
@@ -594,12 +613,14 @@ export default function idleWatch(pi: ExtensionAPI): void {
 	pi.on("turn_start", () => {
 		turnsInFlight++;
 		bumpWork(1);
+		lastActivityAt = Date.now();
 	});
 	pi.on("turn_end", () => {
 		if (turnsInFlight > 0) {
 			turnsInFlight--;
 			bumpWork(-1);
 		}
+		lastActivityAt = Date.now();
 	});
 
 	// Tool execution: catches built-in tools AND subagents (subagents are tools).
@@ -608,12 +629,14 @@ export default function idleWatch(pi: ExtensionAPI): void {
 		if (!id || inFlightTools.has(id)) return;
 		inFlightTools.add(id);
 		bumpWork(1);
+		lastActivityAt = Date.now();
 	});
 	pi.on("tool_execution_end", (event) => {
 		const id = event?.toolCallId;
 		if (!id || !inFlightTools.has(id)) return;
 		inFlightTools.delete(id);
 		bumpWork(-1);
+		lastActivityAt = Date.now();
 	});
 
 	// Safety net: when the whole prompt-level run ends, counts should reach 0.
@@ -663,11 +686,12 @@ export default function idleWatch(pi: ExtensionAPI): void {
 
 				case "ack": {
 					ackedState = state;
-					const id = activeNotif[state];
-					if (id) {
-						activeNotif[state] = null;
-						await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
-					}
+					// AUTO-DISMISS DISABLED (investigating vanishing notifications)
+					// const id = activeNotif[state];
+					// if (id) {
+					// 	activeNotif[state] = null;
+					// 	await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
+					// }
 					notify(`idle-watch: acked ${state} — muted until state changes`);
 					return;
 				}
@@ -677,11 +701,12 @@ export default function idleWatch(pi: ExtensionAPI): void {
 					if (!dur) {
 						// indefinite pause — until /idle resume or state change of user's choosing
 						pausedUntil = Number.POSITIVE_INFINITY;
-						const id = activeNotif[state];
-						if (id) {
-							activeNotif[state] = null;
-							await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
-						}
+						// AUTO-DISMISS DISABLED (investigating vanishing notifications)
+						// const id = activeNotif[state];
+						// if (id) {
+						// 	activeNotif[state] = null;
+						// 	await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
+						// }
 						notify("idle-watch: paused indefinitely — /idle resume to clear");
 						return;
 					}
@@ -693,11 +718,12 @@ export default function idleWatch(pi: ExtensionAPI): void {
 						return;
 					}
 					pausedUntil = Date.now() + ms;
-					const id = activeNotif[state];
-					if (id) {
-						activeNotif[state] = null;
-						await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
-					}
+					// AUTO-DISMISS DISABLED (investigating vanishing notifications)
+					// const id = activeNotif[state];
+					// if (id) {
+					// 	activeNotif[state] = null;
+					// 	await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
+					// }
 					notify(`idle-watch: paused for ${fmtDuration(ms)}`);
 					return;
 				}
