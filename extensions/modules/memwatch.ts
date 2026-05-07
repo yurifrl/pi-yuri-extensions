@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { push as cmuxPush, dismiss as cmuxDismiss, dismissSync as cmuxDismissSync } from "./lib/cmuxNotify.ts";
+import { readPiYuConfigFile } from "./lib/config.ts";
 
 /**
  * memwatch — periodic per-session pi memory check, surfaced via cmux notifications.
@@ -76,9 +77,11 @@ function fmtMB(kb: number): string {
   return `${Math.round(kb / 1024)} MB`;
 }
 
-function loadConfig(ctx: any): Required<MemwatchConfig> {
+async function loadConfig(cwd: string): Promise<Required<MemwatchConfig>> {
   try {
-    const cfg = (ctx?.config?.extensions?.memwatch ?? ctx?.config?.memwatch ?? {}) as MemwatchConfig;
+    const { content } = await readPiYuConfigFile(cwd);
+    if (!content) return { ...DEFAULTS };
+    const cfg = (JSON.parse(content) as { memwatch?: MemwatchConfig }).memwatch ?? {};
     return {
       intervalMinutes: cfg.intervalMinutes ?? DEFAULTS.intervalMinutes,
       warnMB: cfg.warnMB ?? DEFAULTS.warnMB,
@@ -143,7 +146,8 @@ export default function memwatch(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     ctxRef = ctx;
     if (timer) return;
-    const cfg = loadConfig(ctx);
+    const cwd = typeof ctx.cwd === "function" ? (ctx.cwd as () => string)() : (ctx.cwd as unknown as string) ?? process.cwd();
+    const cfg = await loadConfig(cwd);
     const ms = Math.max(1, cfg.intervalMinutes) * 60 * 1000;
     timer = setInterval(() => {
       void tick().catch(() => {});

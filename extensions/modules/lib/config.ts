@@ -8,11 +8,30 @@ export type PiYuConfig = {
 	extensions?: Record<string, boolean>;
 	crossAgent?: {
 		allowlist?: string[];
+		verbose?: boolean;
 		recursiveDepth?: {
 			skills?: number;
 			agents?: number;
 			commands?: number;
 		};
+	};
+	awsLogin?: {
+		profiles?: string[];
+		chromeProfiles?: Record<string, string>;
+		defaultChromeProfile?: string;
+		browserApp?: string;
+	};
+	memwatch?: {
+		intervalMinutes?: number;
+		warnMB?: number;
+		criticalMB?: number;
+	};
+	"idle-watch"?: {
+		enabled?: boolean;
+		tickSeconds?: number;
+		graceSeconds?: number;
+		working?: string | string[];
+		idle?: string | string[];
 	};
 };
 

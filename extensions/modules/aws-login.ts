@@ -6,15 +6,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { readPiYuConfig } from "./lib/config.ts";
 
-type AwsLoginConfig = {
-  awsLogin?: {
-    profiles?: string[];
-    chromeProfiles?: Record<string, string>;
-    defaultChromeProfile?: string;
-    browserApp?: string;
-  };
-};
-
 type State = "pending" | "focus" | "running" | "ok" | "error";
 type Row = { profile: string; chrome?: string; state: State; detail?: string; elapsedMs?: number };
 
@@ -43,7 +34,7 @@ export default function (pi: ExtensionAPI) {
     description: "Run `aws sso login` for configured AWS profiles, focusing the right Chrome profile first",
     handler: async (args, ctx) => {
       const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
-      const { config } = (await readPiYuConfig(cwd)) as { config: AwsLoginConfig };
+      const { config } = await readPiYuConfig(cwd);
       const awsCfg = config.awsLogin ?? {};
 
       const argTrim = args.trim();
