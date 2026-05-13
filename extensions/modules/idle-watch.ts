@@ -44,7 +44,6 @@
  *
  * Commands:
  *   /idle           status + effective config
- *   /idle on | off  enable/disable for this session (wiped on restart)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -324,7 +323,6 @@ function render(tmpl: string, vars: Record<string, string>): string {
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let config: Config = DEFAULTS;
-let sessionEnabled: boolean | null = null; // null = defer to config.enabled; bool = session override
 let cwdRef = process.cwd();
 let ctxRef: unknown = null;
 let piRef: ExtensionAPI | null = null;
@@ -341,7 +339,6 @@ const lastFiredAt: Record<PiState, number | null> = { working: null, idle: null 
 const activeNotif: Record<PiState, string | null> = { working: null, idle: null };
 
 // Session-only suppression overrides (cleared on transition/timeout/restart).
-let ackedState: PiState | null = null; // if set and === state, no fires until transition
 let pausedUntil: number | null = null; // epoch ms; while now < pausedUntil, no fires
 
 // Live count of in-flight work units: turns + tool executions (subagents are
@@ -360,7 +357,7 @@ let exitRegistered = false;
 // ─── core loop ──────────────────────────────────────────────────────────
 
 function effectiveEnabled(): boolean {
-	return sessionEnabled === null ? config.enabled : sessionEnabled;
+	return config.enabled;
 }
 
 function pollIsIdle(): boolean | null {
@@ -392,7 +389,6 @@ async function tick(): Promise<void> {
 			fired.idle = 0;
 			lastFiredAt.working = null;
 			lastFiredAt.idle = null;
-			ackedState = null; // transitioning clears ack
 			// AUTO-DISMISS DISABLED (investigating vanishing notifications)
 			// const toDismiss = activeNotif[prev];
 			// if (toDismiss) {
@@ -431,7 +427,6 @@ async function tick(): Promise<void> {
 	if (elapsed < thresholdMs) return;
 
 	// Session-only suppressions.
-	if (ackedState === state) return;
 	if (pausedUntil !== null) {
 		if (now < pausedUntil) return;
 		pausedUntil = null; // auto-clear when window ends
@@ -513,7 +508,7 @@ function statusText(): string {
 
 	let eta: string;
 	if (!on) {
-		eta = "disabled — /idle on";
+		eta = "disabled in config";
 	} else if (fired[state] >= schedule.length) {
 		eta = `schedule exhausted (${fired[state]}/${schedule.length}), waiting for state change`;
 	} else if (fired[state] > 0) {
@@ -549,12 +544,10 @@ function statusText(): string {
 		`summary: ${summary || "(none)"}`,
 		`schedule: working=[${config.working.join(",")}]  idle=[${config.idle.join(",")}]  tick=${config.tickSeconds}s  grace=${config.graceSeconds}s`,
 		`work: turns=${turnsInFlight} tools=${inFlightTools.size} total=${workCount}  ctx.isIdle=${pollIsIdle() === null ? "?" : pollIsIdle() ? "true" : "false"}`,
-		`suppression: ack=${ackedState ? `${ackedState} (until transition)` : "off"}  pause=${pauseStatusText(now)}`,
+		`suppression: pause=${pauseStatusText(now)}`,
 		`commands:`,
 		`  /idle                 show this status`,
-		`  /idle on | off        enable/disable for this session`,
-		`  /idle ack             dismiss current notif, mute until state changes`,
-		`  /idle pause           pause until next notification would fire (then auto-resume)`,
+		`  /idle pause           pause indefinitely — /idle resume to clear`,
 		`  /idle pause <dur>     pause for a duration (e.g. 10m)`,
 		`  /idle resume          clear any active pause`,
 		`  /idle reset           clear fire counters for current state`,
@@ -654,11 +647,22 @@ export default function idleWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand?.("idle", {
-		description: "idle-watch: /idle [on|off|ack|pause [dur]|resume|reset]",
+		description: "idle-watch: /idle [pause [dur]|resume|reset|status]",
+		getArgumentCompletions: () => [
+			{ value: "pause", label: "pause", description: "Pause notifications (no duration = indefinite, or e.g. 10m)" },
+			{ value: "resume", label: "resume", description: "Clear any active pause" },
+			{ value: "reset", label: "reset", description: "Clear fire counters for current state" },
+			{ value: "status", label: "status", description: "Show status + effective config" },
+		],
 		handler: async (args, ctx) => {
 			const raw = (args ?? "").trim();
 			const parts = raw.split(/\s+/).filter(Boolean);
 			const sub = (parts[0] ?? "").toLowerCase();
+			// eslint-disable-next-line no-console
+			console.log(`[idle] args=${JSON.stringify(args)} raw=${JSON.stringify(raw)} parts=${JSON.stringify(parts)} sub=${JSON.stringify(sub)}`);
+			try {
+				ctx?.ui?.notify?.(`[idle debug] args=${JSON.stringify(args)} parts=${JSON.stringify(parts)}`, "info");
+			} catch {}
 
 			// bare /idle → status
 			if (!sub) {
@@ -678,24 +682,6 @@ export default function idleWatch(pi: ExtensionAPI): void {
 			};
 
 			switch (sub) {
-				case "on":
-				case "off":
-					sessionEnabled = sub === "on";
-					notify(`idle-watch ${sub}`);
-					return;
-
-				case "ack": {
-					ackedState = state;
-					// AUTO-DISMISS DISABLED (investigating vanishing notifications)
-					// const id = activeNotif[state];
-					// if (id) {
-					// 	activeNotif[state] = null;
-					// 	await cmuxDismiss(id, piRef ?? undefined).catch(() => {});
-					// }
-					notify(`idle-watch: acked ${state} — muted until state changes`);
-					return;
-				}
-
 				case "pause": {
 					const dur = parts[1];
 					if (!dur) {
