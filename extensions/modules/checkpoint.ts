@@ -205,7 +205,7 @@ function buildCheckpointPrompt(
   const contextFile = path.join(cwd, ".agents", "contexts", `${contextName}.md`);
   const project = path.basename(cwd);
 
-  return `Perform a session checkpoint now. Run all three phases in order: save, summary, changelog.
+  return `Perform a session checkpoint now. Run all four phases in order: save, summary, changelog, timeline.
 
 **Important:** If you see multiple checkpoint prompts in this conversation, only execute THIS one (context name: ${contextName}). Ignore any earlier checkpoint prompts with different context names — they are stale duplicates.
 
@@ -287,6 +287,18 @@ Update existing session block in place, don't duplicate. Create CHANGELOG.md if 
 If the changelog already has an up-to-date entry for this session, write "Changelog: already up to date" — do not repeat the entry.
 Truthful, deduplicated, concise, no trivial changes.
 
+## Phase 4 — Timeline of subjects
+
+Print a chronological timeline of the distinct subjects/topics the session moved through, in the order they came up. This is a navigation aid — the user scans it to recall the shape of the session.
+
+Rules:
+- Order strictly chronological (first subject first, last subject last).
+- One line per subject. Short noun phrase, not a sentence. No filler.
+- Merge follow-ups and back-and-forth on the same topic into a single entry — don't repeat a subject because it came up twice.
+- Include topic shifts, tangents, and abandoned threads if they were non-trivial.
+- Use 5–12 entries typically. Fewer is fine for short sessions; don't pad.
+- Format: a plain markdown list, dash-prefixed, no numbering, no timestamps.
+
 ## Final output shape
 
 \`\`\`
@@ -304,9 +316,16 @@ Resume: cly agent-session resume --provider pi ${contextName}
 ---
 
 Changelog: <"updated" with the new entry, or "already up to date">
+
+---
+
+Timeline:
+- <subject 1>
+- <subject 2>
+- ...
 \`\`\`
 
-Be concise. The summary is mandatory and must be self-contained.`;
+Be concise. The summary is mandatory and must be self-contained. The timeline is always printed, even on --compact.`;
 }
 
 export default function checkpoint(pi: ExtensionAPI) {
