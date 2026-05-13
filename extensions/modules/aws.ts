@@ -30,17 +30,37 @@ const STATE_COLOR: Record<State, "dim" | "accent" | "warning" | "success" | "err
 };
 
 export default function (pi: ExtensionAPI) {
-  pi.registerCommand("aws-login", {
-    description: "Run `aws sso login` for configured AWS profiles, focusing the right Chrome profile first",
+  pi.registerCommand("aws", {
+    description: "aws: /aws login [profiles...]",
+    getArgumentCompletions: () => [
+      {
+        value: "login",
+        label: "login",
+        description: "Run `aws sso login` for configured AWS profiles, focusing the right Chrome profile first",
+      },
+    ],
     handler: async (args, ctx) => {
       const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
       const { config } = await readPiYuConfig(cwd);
       const awsCfg = config.awsLogin ?? {};
 
-      const argTrim = args.trim();
+      const raw = (args ?? "").trim();
+      const parts = raw.split(/\s+/).filter(Boolean);
+      const sub = (parts[0] ?? "").toLowerCase();
+
+      if (!sub) {
+        ctx.ui.notify?.("aws: usage — /aws login [profile ...]", "info");
+        return;
+      }
+      if (sub !== "login") {
+        ctx.ui.notify?.(`aws: unknown subcommand '${sub}'. Try /aws login.`, "error");
+        return;
+      }
+
+      const profileArgs = parts.slice(1);
       const profiles =
-        argTrim.length > 0
-          ? argTrim.split(/\s+/)
+        profileArgs.length > 0
+          ? profileArgs
           : awsCfg.profiles?.length
             ? awsCfg.profiles
             : DEFAULT_PROFILES;

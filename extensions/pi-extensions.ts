@@ -25,7 +25,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   draft: () => import("./modules/draft.ts"),
   "greetings": () => import("./modules/greetings.ts"),
   gastown: () => import("./modules/gastown.ts"),
-  "aws-login": () => import("./modules/aws-login.ts"),
+  aws: () => import("./modules/aws.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
   "idle-watch": () => import("./modules/idle-watch.ts"),
 };
