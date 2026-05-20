@@ -17,8 +17,10 @@ export default function greetings(pi: ExtensionAPI) {
   pi.on("session_start", (_e, ctx) => {
     const id = sessionId(ctx.sessionManager?.getSessionFile?.());
     try {
-      ctx.ui?.notify?.(formatted(id), "info");
-    } catch {}
+      ctx.ui.notify(formatted(id), "info");
+    } catch (err) {
+      console.warn("[greetings] failed to show session id notification:", err);
+    }
 
     process.on("exit", () => {
       process.stdout.write(formatted(id) + "\n");

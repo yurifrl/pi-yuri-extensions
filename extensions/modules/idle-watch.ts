@@ -298,7 +298,9 @@ function buildVars(pi: ExtensionAPI, state: PiState, elapsedMs: number, threshol
 	let summary = "";
 	try {
 		summary = pi.getSessionName?.() ?? "";
-	} catch {}
+	} catch (err) {
+		console.warn("[idle-watch] getSessionName failed in buildVars:", err);
+	}
 	const ws = workspaceTitle;
 	return {
 		state,
@@ -464,7 +466,9 @@ async function fire(s: PiState, elapsed: number, threshold: string): Promise<voi
 	try {
 		const id = await cmuxPush({ title, subtitle, body }, piRef);
 		if (id) activeNotif[s] = id;
-	} catch {}
+	} catch (err) {
+		console.warn(`[idle-watch] cmuxPush failed for state=${s}:`, err);
+	}
 }
 
 function shutdown(): void {
@@ -503,7 +507,9 @@ function statusText(): string {
 	let thresholdMs = 0;
 	try {
 		thresholdMs = parseDuration(thresholdStr);
-	} catch {}
+	} catch (err) {
+		console.warn(`[idle-watch] invalid threshold duration '${thresholdStr}' in config:`, err);
+	}
 	const sinceEntered = now - enteredAt;
 
 	let eta: string;
@@ -516,7 +522,9 @@ function statusText(): string {
 		let gapMs = 0;
 		try {
 			gapMs = parseDuration(gapStr);
-		} catch {}
+		} catch (err) {
+			console.warn(`[idle-watch] invalid gap duration '${gapStr}' in config:`, err);
+		}
 		const last = lastFiredAt[state] ?? now;
 		const remain = Math.max(0, gapMs - (now - last));
 		eta = `fire ${fired[state] + 1}/${schedule.length} in ${fmtDuration(remain)} (gap ${gapStr})`;
@@ -532,7 +540,9 @@ function statusText(): string {
 	let summary = "";
 	try {
 		summary = piRef?.getSessionName?.() ?? "";
-	} catch {}
+	} catch (err) {
+		console.warn("[idle-watch] getSessionName failed in statusText:", err);
+	}
 
 	// Single dense block. No blank lines, no trailing content. Each line stands
 	// alone so the TUI's toast renderer can't collapse empty rows or let the
@@ -659,26 +669,16 @@ export default function idleWatch(pi: ExtensionAPI): void {
 			const parts = raw.split(/\s+/).filter(Boolean);
 			const sub = (parts[0] ?? "").toLowerCase();
 			// eslint-disable-next-line no-console
-			console.log(`[idle] args=${JSON.stringify(args)} raw=${JSON.stringify(raw)} parts=${JSON.stringify(parts)} sub=${JSON.stringify(sub)}`);
-			try {
-				ctx?.ui?.notify?.(`[idle debug] args=${JSON.stringify(args)} parts=${JSON.stringify(parts)}`, "info");
-			} catch {}
+			ctx.ui.notify(`[idle debug] args=${JSON.stringify(args)} parts=${JSON.stringify(parts)}`, "info");
 
 			// bare /idle → status
 			if (!sub) {
-				const text = statusText();
-				// eslint-disable-next-line no-console
-				console.log(text);
-				try {
-					ctx?.ui?.notify?.(text, "info");
-				} catch {}
+				ctx.ui.notify(statusText(), "info");
 				return;
 			}
 
-			const notify = (msg: string, kind: "success" | "info" | "error" = "success") => {
-				try {
-					ctx?.ui?.notify?.(msg, kind);
-				} catch {}
+			const notify = (msg: string, kind: "info" | "warning" | "error" = "info") => {
+				ctx.ui.notify(msg, kind);
 			};
 
 			switch (sub) {
@@ -731,10 +731,7 @@ export default function idleWatch(pi: ExtensionAPI): void {
 				}
 
 				case "status": {
-					const text = statusText();
-					// eslint-disable-next-line no-console
-					console.log(text);
-					notify(text, "info");
+					notify(statusText(), "info");
 					return;
 				}
 

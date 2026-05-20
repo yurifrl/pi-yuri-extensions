@@ -154,7 +154,9 @@ function scanCommands(dir: string, maxDepth = 0): Discovered[] {
 					description: description || body.split("\n").find((l) => l.trim())?.trim() || "",
 					content: body,
 				});
-			} catch {}
+			} catch (err) {
+				console.warn(`[cross-agent] scanCommands failed to parse '${filePath}':`, err);
+			}
 		}
 	}
 
@@ -178,7 +180,9 @@ function scanSkills(dir: string, maxDepth = 0): string[] {
 				seen.add(name);
 				names.push(name);
 			}
-		} catch {}
+		} catch (err) {
+			console.warn(`[cross-agent] scanSkills failed at '${entryPath}':`, err);
+		}
 	}
 	return names;
 }
@@ -197,7 +201,9 @@ function scanAgents(dir: string, maxDepth = 0): Discovered[] {
 				description: fields.description || "",
 				content: raw,
 			});
-		} catch {}
+		} catch (err) {
+			console.warn(`[cross-agent] scanAgents failed to parse '${filePath}':`, err);
+		}
 	}
 	return items;
 }
@@ -284,7 +290,9 @@ function discoverSourceGroup(spec: SourceSpec, depths: { commands: number; skill
 		try {
 			loadedAgentsFiles.push(filePath);
 			loadedAgentsContent.push(readFileSync(filePath, "utf-8"));
-		} catch {}
+		} catch (err) {
+			console.warn(`[cross-agent] failed to read agents file '${filePath}':`, err);
+		}
 	}
 
 	if (!commands.length && !skills.length && !agents.length && !agentsFiles.length) return null;

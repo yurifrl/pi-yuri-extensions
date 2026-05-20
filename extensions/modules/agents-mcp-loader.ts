@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
 
@@ -79,7 +79,23 @@ export default function (pi: ExtensionAPI) {
     if (existsSync(destPath)) {
       try {
         existing = JSON.parse(readFileSync(destPath, "utf-8"));
-      } catch {}
+      } catch (err) {
+        const backupPath = `${destPath}.corrupt-${Date.now()}`;
+        try {
+          copyFileSync(destPath, backupPath);
+          console.warn(
+            `[agents-mcp-loader] failed to parse ${destPath}; backed up to ${backupPath} before overwriting:`,
+            err,
+          );
+        } catch (backupErr) {
+          console.warn(
+            `[agents-mcp-loader] failed to parse ${destPath} AND failed to back it up. Refusing to overwrite.`,
+            err,
+            backupErr,
+          );
+          return;
+        }
+      }
     }
 
     const existingServers =

@@ -62,7 +62,9 @@ function findSessionInCly(sessionId: string): Entry | null {
     for (const entry of Object.values(sessions) as Entry[]) {
       if (entry.id === sessionId) return entry;
     }
-  } catch {}
+  } catch (err) {
+    console.warn(`[checkpoint] failed to read cly sessions.json for sessionId=${sessionId}:`, err);
+  }
   return null;
 }
 
@@ -101,12 +103,14 @@ async function generateSessionMeta(ctx: any): Promise<{ shortName: string; descr
   const conversationText = serializeConversation(convertToLlm(messages));
   const cwd = ctx.cwd || process.cwd();
 
-  let gitContext = "";
+  let gitContext = "(not in git repo)";
   try {
     const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { encoding: "utf-8", cwd }).trim();
     const log = execFileSync("git", ["log", "--oneline", "-3"], { encoding: "utf-8", cwd }).trim();
     gitContext = `New files:\n${untracked}\n\nRecent commits:\n${log}`;
-  } catch {}
+  } catch (err) {
+    console.warn(`[checkpoint] git context unavailable in cwd=${cwd}:`, err);
+  }
 
   const model = ctx.model;
   if (!model) throw new Error("No active model available");
@@ -159,7 +163,9 @@ function findContextFileBySessionId(cwd: string, sessionId: string): { name: str
         return { name, contextFile: fullPath };
       }
     }
-  } catch {}
+  } catch (err) {
+    console.warn(`[checkpoint] failed to scan context files for sessionId=${sessionId}:`, err);
+  }
   return null;
 }
 

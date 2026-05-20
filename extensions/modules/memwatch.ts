@@ -188,7 +188,11 @@ export default function memwatch(pi: ExtensionAPI): void {
       //   currentNotifId = null;
       // }
       lastLevel = "none";
-      try { ctx?.ui?.notify?.("memwatch cleared", "info"); } catch {}
+      try {
+        ctx.ui.notify("memwatch cleared", "info");
+      } catch (err) {
+        console.warn("[memwatch] failed to notify cleared:", err);
+      }
     },
   });
 
