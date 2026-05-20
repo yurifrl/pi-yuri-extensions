@@ -341,12 +341,7 @@ function renderNotification(groups: SourceGroup[], home: string): string {
 export default function (pi: ExtensionAPI) {
 	let loadedAgentsContent: string[] = [];
 
-	pi.registerFlag("cross-agent-verbose", {
-		description: "Print cross-agent discovery details on startup",
-		type: "boolean",
-		default: false,
-	});
-
+	// --cross-agent-verbose flag registered in pi-extensions.ts (preboot)
 	pi.on("session_start", async (_event, ctx) => {
 		const { config } = await readPiYuConfig(ctx.cwd);
 		const home = homedir();

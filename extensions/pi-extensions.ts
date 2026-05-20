@@ -13,6 +13,7 @@ type ToggleConfig = {
 };
 
 const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
+  yes: () => import("./modules/yes.ts"),
   "agents-mcp-loader": () => import("./modules/agents-mcp-loader.ts"),
   "yu-notify": () => import("./modules/yu-notify.ts"),
   "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
@@ -102,6 +103,18 @@ async function loadEnabled(pi: ExtensionAPI, cwd: string): Promise<{ loaded: str
 }
 
 export default function piYu(pi: ExtensionAPI) {
+  // Flags for modules that need preboot registration.
+  // registerFlag only works here (before argv is parsed); modules load too late.
+  pi.registerFlag?.("yes", {
+    description: "Auto-approve all interactive prompts (session-only)",
+    type: "boolean",
+    default: false,
+  });
+  pi.registerFlag?.("cross-agent-verbose", {
+    description: "Print cross-agent discovery details on startup",
+    type: "boolean",
+    default: false,
+  });
   let initialized = false;
   let loadedModules: string[] = [];
   let configPath = path.join(process.cwd(), ".pi", "extensions", "pi-extensions.json");
