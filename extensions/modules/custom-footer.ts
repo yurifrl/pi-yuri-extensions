@@ -1,8 +1,65 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth } from "@mariozechner/pi-tui";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+// -- AWS / Kube context helpers --
+function getAwsProfile(): string {
+	return (
+		process.env.AWS_VAULT ||
+		process.env.AWS_PROFILE ||
+		process.env.AWS_DEFAULT_PROFILE ||
+		""
+	).trim();
+}
+
+function shortenAws(name: string): string {
+	if (!name) return "";
+	return name.length > 12 ? name.slice(0, 12) : name;
+}
+
+function shortenKube(ctx: string): string {
+	if (!ctx) return "";
+	let s = ctx;
+	// arn:aws:eks:<region>:<acct>:cluster/<name>
+	const eksArn = s.match(/^arn:aws:eks:[^:]+:[^:]+:cluster\/(.+)$/);
+	if (eksArn) s = eksArn[1];
+	// gke_<project>_<zone>_<cluster>
+	else if (s.startsWith("gke_")) {
+		const parts = s.split("_");
+		if (parts.length >= 4) s = parts[parts.length - 1];
+	}
+	// user@cluster.region.eksctl.io -> cluster
+	else if (s.includes("@") && s.includes(".eksctl.io")) {
+		const after = s.split("@")[1] || "";
+		s = after.split(".")[0] || s;
+	}
+	// fallback: last segment after / or _
+	else if (s.includes("/")) s = s.split("/").pop() || s;
+	return s.length > 18 ? s.slice(0, 18) : s;
+}
+
+let kubeCtxCache = "";
+let kubeCtxLastRead = 0;
+function getKubeContext(): string {
+	const now = Date.now();
+	if (now - kubeCtxLastRead < 10_000) return kubeCtxCache;
+	kubeCtxLastRead = now;
+	try {
+		const path = process.env.KUBECONFIG?.split(":")[0] || join(homedir(), ".kube", "config");
+		const contents = readFileSync(path, "utf8");
+		const m = contents.match(/^current-context:\s*(.+?)\s*$/m);
+		kubeCtxCache = m ? m[1].replace(/^['"]|['"]$/g, "") : "";
+	} catch {
+		kubeCtxCache = "";
+	}
+	return kubeCtxCache;
+}
 
 export default function (pi: ExtensionAPI) {
+	let showContext = true;
 	// -- Summary widget above editor (reads from pi-session-summary via session name) --
 	let summaryPollTimer: ReturnType<typeof setInterval> | null = null;
 	let lastDisplayedSummary = "";
@@ -125,6 +182,15 @@ export default function (pi: ExtensionAPI) {
 					const branch = footerData.getGitBranch();
 					const branchStr = branch ? theme.fg("accent", `⎇ ${branch}`) : "";
 
+					let awsStr = "";
+					let kubeStr = "";
+					if (showContext) {
+						const aws = shortenAws(getAwsProfile());
+						if (aws) awsStr = theme.fg("warning", "☁ ") + theme.fg("accent", aws);
+						const kctx = shortenKube(getKubeContext());
+						if (kctx) kubeStr = theme.fg("success", "⎈ ") + theme.fg("accent", kctx);
+					}
+
 					const thinking = pi.getThinkingLevel();
 					const thinkColor = thinking === "high" ? "warning" : thinking === "medium" ? "accent" : thinking === "low" ? "dim" : "muted";
 					const modelId = active.model?.id || "no-model";
@@ -133,6 +199,8 @@ export default function (pi: ExtensionAPI) {
 					const sep = theme.fg("dim", " | ");
 					const leftParts = [modelStr, tokenStats, cwdStr];
 					if (branchStr) leftParts.push(branchStr);
+					if (awsStr) leftParts.push(awsStr);
+					if (kubeStr) leftParts.push(kubeStr);
 					const left = leftParts.join(sep);
 
 					return [truncateToWidth(left, width)];
@@ -141,5 +209,17 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 	pi.on("session_start", async (_event, ctx) => { installFooter(ctx); });
-	pi.on("session_switch", async (_event, ctx) => { footerCtx = ctx; });
+	pi.on("session_switch", async (_event, ctx) => { footerCtx = ctx; kubeCtxLastRead = 0; });
+
+	pi.registerCommand("footer:context", {
+		description: "Show or hide AWS / kube context in the footer (on/off, no arg toggles)",
+		handler: async (args, ctx) => {
+			const arg = args.trim().toLowerCase();
+			if (arg === "on") showContext = true;
+			else if (arg === "off") showContext = false;
+			else showContext = !showContext;
+			kubeCtxLastRead = 0;
+			ctx.ui.notify(`Footer context ${showContext ? "on" : "off"}`, "info");
+		},
+	});
 }
