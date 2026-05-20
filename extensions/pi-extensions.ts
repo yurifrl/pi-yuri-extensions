@@ -62,7 +62,19 @@ async function readConfig(cwd: string): Promise<{ config: ToggleConfig; configPa
 
 function enabledModules(config: ToggleConfig): string[] {
   const entries = config.extensions || {};
-  return Object.keys(MODULE_LOADERS).filter((name) => entries[name] === true);
+
+  // PI_GASTOWN env var force-enables the gastown module regardless of JSON config.
+  // Useful for envbar-style toggles: PI_GASTOWN=1 pi
+  const envGastownOn =
+    process.env.PI_GASTOWN?.toLowerCase() === "1" ||
+    process.env.PI_GASTOWN?.toLowerCase() === "true" ||
+    process.env.PI_GASTOWN?.toLowerCase() === "yes" ||
+    process.env.PI_GASTOWN?.toLowerCase() === "on";
+
+  return Object.keys(MODULE_LOADERS).filter((name) => {
+    if (name === "gastown" && envGastownOn) return true;
+    return entries[name] === true;
+  });
 }
 
 async function loadEnabled(pi: ExtensionAPI, cwd: string): Promise<{ loaded: string[]; configPath: string }> {
