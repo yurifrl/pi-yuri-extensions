@@ -3,8 +3,8 @@
  *
  * Surfaces agent events as cmux notifications so you know when Pi needs
  * attention even if the terminal isn't focused. Currently covers:
- *   - guardrails:dangerous  → ⚠️ Dangerous Command
- *   - guardrails:blocked    → 🚫 Command Blocked
+ *   - guardrails:risk:detected   → ⚠️ Dangerous Command
+ *   - guardrails:action:blocked  → 🚫 Command Blocked
  *   - AskUserQuestion tool  → ❓ Question
  *   - agent_end (error)     → 💥 Pi Error (e.g. EADDRNOTAVAIL, provider failure)
  *   - tool_result (isError) → 🛠️ Tool Error
@@ -22,21 +22,48 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { readPiYuConfigFile } from "../lib/config.ts";
 
-const GUARDRAILS_DANGEROUS_EVENT = "guardrails:dangerous";
-const GUARDRAILS_BLOCKED_EVENT = "guardrails:blocked";
+// Event names emitted by @aliou/pi-guardrails (see src/shared/events.ts).
+const GUARDRAILS_RISK_DETECTED_EVENT = "guardrails:risk:detected";
+const GUARDRAILS_ACTION_BLOCKED_EVENT = "guardrails:action:blocked";
 
-interface GuardrailsDangerousEvent {
-  command: string;
-  description: string;
-  pattern: string;
+type GuardrailsAction =
+  | { kind: "file"; path: string; origin?: string }
+  | { kind: "command"; command: string; origin?: string };
+
+interface GuardrailsRiskDetectedEvent {
+  source: "guardrails";
+  feature: "policies" | "permissionGate" | "pathAccess";
+  timestamp: string;
+  risk: {
+    kind: "dangerous";
+    action: GuardrailsAction;
+    key: string;
+    reason: string;
+    metadata?: unknown;
+  };
+  context?: { toolName?: string; input?: Record<string, unknown> };
 }
 
-interface GuardrailsBlockedEvent {
-  feature: "policies" | "permissionGate";
-  toolName: string;
-  input: Record<string, unknown>;
+interface GuardrailsActionBlockedEvent {
+  source: "guardrails";
+  feature: "policies" | "permissionGate" | "pathAccess";
+  timestamp: string;
+  action: GuardrailsAction;
   reason: string;
-  userDenied?: boolean;
+  block: {
+    source: "policy" | "permission" | "user" | "nonInteractive";
+    metadata?: unknown;
+  };
+  context?: { toolName?: string; input?: Record<string, unknown> };
+}
+
+function describeAction(action: GuardrailsAction | undefined): string {
+  if (!action) return "";
+  return action.kind === "command" ? action.command : action.path;
+}
+
+function trim(text: string, max = 200): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 type NotifConfig = {
@@ -81,17 +108,33 @@ export default function supplementalNotificationsExtension(pi: ExtensionAPI) {
     }
   }
 
-  // Guardrails: dangerous command detected
-  pi.events.on(GUARDRAILS_DANGEROUS_EVENT, (event: GuardrailsDangerousEvent) => {
+  // Guardrails: dangerous action detected (pre-prompt risk).
+  pi.events.on(GUARDRAILS_RISK_DETECTED_EVENT, (event: GuardrailsRiskDetectedEvent) => {
     if (!cfg.dangerousCommand) return;
-    notify("⚠️ Dangerous Command", `${event.description}: ${event.command}`);
+    const target = describeAction(event?.risk?.action);
+    const reason = event?.risk?.reason || "Dangerous action";
+    const body = target ? `${reason}: ${target}` : reason;
+    notify("⚠️ Dangerous Command", trim(body));
   });
 
-  // Guardrails: command blocked
-  pi.events.on(GUARDRAILS_BLOCKED_EVENT, (event: GuardrailsBlockedEvent) => {
+  // Guardrails: action blocked (policy / permission / user / non-interactive).
+  pi.events.on(GUARDRAILS_ACTION_BLOCKED_EVENT, (event: GuardrailsActionBlockedEvent) => {
     if (!cfg.blockedCommand) return;
-    const who = event.userDenied ? "You denied" : "Blocked";
-    notify("🚫 Command Blocked", `${who}: ${event.reason}`);
+    const src = event?.block?.source;
+    const who =
+      src === "user"
+        ? "You denied"
+        : src === "policy"
+          ? "Policy blocked"
+          : src === "permission"
+            ? "Permission denied"
+            : src === "nonInteractive"
+              ? "Blocked (non-interactive)"
+              : "Blocked";
+    const target = describeAction(event?.action);
+    const reason = event?.reason || "Action blocked";
+    const body = target ? `${who}: ${reason} — ${target}` : `${who}: ${reason}`;
+    notify("🚫 Command Blocked", trim(body));
   });
 
   // AskUserQuestion: agent needs input

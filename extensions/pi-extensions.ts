@@ -115,6 +115,11 @@ export default function piYu(pi: ExtensionAPI) {
     type: "boolean",
     default: false,
   });
+  pi.registerFlag?.("quiet", {
+    description: "Suppress non-error pi-extensions / pi-gastown notifications (info/success toasts)",
+    type: "boolean",
+    default: false,
+  });
   let initialized = false;
   let loadedModules: string[] = [];
   let configPath = path.join(process.cwd(), ".pi", "extensions", "pi-extensions.json");
@@ -122,6 +127,18 @@ export default function piYu(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (initialized) return;
     initialized = true;
+
+    // --quiet: monkey-patch the shared uiContext so EVERY extension's
+    // ctx.ui.notify(...) becomes a no-op (errors still surface). All
+    // extensions read ctx.ui from the same runner.uiContext object, so
+    // patching once silences pi-extensions, pi-gastown, idle-watch,
+    // anything else loaded.
+    if (pi.getFlag?.("quiet") === true) {
+      const orig = ctx.ui.notify.bind(ctx.ui);
+      ctx.ui.notify = (msg: string, type?: "info" | "warning" | "error") => {
+        if (type === "error") orig(msg, type);
+      };
+    }
 
     const loaded = await loadEnabled(pi, typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd);
     loadedModules = loaded.loaded;
@@ -131,7 +148,9 @@ export default function piYu(pi: ExtensionAPI) {
       ? `pi-extensions loaded: ${loadedModules.join(", ")}`
       : "pi-extensions loaded with no active modules (all off by default)";
 
-    ctx.ui.notify(msg, loadedModules.length > 0 ? "success" : "info");
+    if (pi.getFlag?.("quiet") !== true) {
+      ctx.ui.notify(msg, loadedModules.length > 0 ? "success" : "info");
+    }
   });
 
   pi.registerCommand("pi-extensions", {
