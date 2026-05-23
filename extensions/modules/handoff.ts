@@ -106,7 +106,9 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setStatus(STATUS_KEY, "⏳ Handoff: collecting context…");
       ctx.ui.notify("Generating handoff…", "info");
 
-      try {
+      // Run async without await — returning quickly unblocks the prompt.
+      void (async () => {
+        try {
         // Try every available source. Slash commands run with limited
         // session views — be defensive about what's wired up.
         const sm: any = ctx.sessionManager;
@@ -229,12 +231,13 @@ export default function (pi: ExtensionAPI) {
           "success",
         );
       } catch (err) {
-        ctx.ui.setStatus(STATUS_KEY, undefined);
-        ctx.ui.notify(
-          `Handoff failed: ${err instanceof Error ? err.message : String(err)}`,
-          "error",
-        );
-      }
+          ctx.ui.setStatus(STATUS_KEY, undefined);
+          ctx.ui.notify(
+            `Handoff failed: ${err instanceof Error ? err.message : String(err)}`,
+            "error",
+          );
+        }
+      })();
     },
   });
 }
