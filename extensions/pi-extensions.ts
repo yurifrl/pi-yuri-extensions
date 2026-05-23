@@ -29,6 +29,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   aws: () => import("./modules/aws.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
   "idle-watch": () => import("./modules/idle-watch.ts"),
+  handoff: () => import("./modules/handoff.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
