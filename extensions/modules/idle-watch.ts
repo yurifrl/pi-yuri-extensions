@@ -47,8 +47,89 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { push as cmuxPush, dismiss as cmuxDismiss, dismissSync as cmuxDismissSync } from "./lib/cmuxNotify.ts";
 import { readPiYuConfigFile } from "./lib/config.ts";
+
+// ─── pi-crew active-run detection ────────────────────────────────────────
+// Bug: when a pi-crew background run is executing, the parent session has
+// no in-flight turn or tool — ctx.isIdle() returns true and idle-watch
+// counts it as idle. Fix: poll the global active-run-index and treat any
+// running run owned by this session (or rooted in our cwd) as "working".
+
+const CREW_ACTIVE_INDEX = join(homedir(), ".pi", "agent", "extensions", "pi-crew", "state", "runs", "active-run-index.json");
+const CREW_HEARTBEAT_MAX_AGE_MS = 90_000; // accept slightly-stale heartbeats
+
+interface CrewIndexEntry {
+	runId?: string;
+	cwd?: string;
+	stateRoot?: string;
+	manifestPath?: string;
+	updatedAt?: string;
+}
+
+interface CrewManifest {
+	status?: string;
+	ownerSessionId?: string;
+	cwd?: string;
+}
+
+function readJsonSync<T>(path: string): T | null {
+	try {
+		const raw = readFileSync(path, "utf-8");
+		return JSON.parse(raw) as T;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Returns true if any pi-crew run is currently active for this session.
+ * Scope: ownerSessionId === our sessionId, OR (no sessionId resolvable AND
+ * cwd matches). Heartbeat freshness gates against stale index entries.
+ */
+function crewActive(): boolean {
+	const entries = readJsonSync<CrewIndexEntry[]>(CREW_ACTIVE_INDEX);
+	if (!Array.isArray(entries) || entries.length === 0) return false;
+
+	let sessionId = "";
+	try {
+		sessionId = (ctxRef as { sessionManager?: { getSessionId?: () => string } } | null)?.sessionManager?.getSessionId?.() ?? "";
+	} catch {}
+
+	const now = Date.now();
+	for (const entry of entries) {
+		if (!entry?.manifestPath) continue;
+		const manifest = readJsonSync<CrewManifest>(entry.manifestPath);
+		if (!manifest) continue;
+		if (manifest.status !== "running") continue;
+
+		// Scope: prefer ownerSessionId match; fall back to cwd match when we
+		// can't resolve our own sessionId.
+		const ownerMatches = sessionId && manifest.ownerSessionId === sessionId;
+		const cwdMatches = !sessionId && (manifest.cwd === cwdRef || entry.cwd === cwdRef);
+		if (!ownerMatches && !cwdMatches) continue;
+
+		// Heartbeat freshness — async runs write heartbeat.json next to manifest.
+		if (entry.stateRoot) {
+			try {
+				const hb = statSync(join(entry.stateRoot, "heartbeat.json"));
+				if (now - hb.mtimeMs > CREW_HEARTBEAT_MAX_AGE_MS) continue;
+			} catch {
+				// no heartbeat yet — fall back to index updatedAt
+				if (entry.updatedAt) {
+					const t = Date.parse(entry.updatedAt);
+					if (Number.isFinite(t) && now - t > CREW_HEARTBEAT_MAX_AGE_MS) continue;
+				}
+			}
+		}
+
+		return true;
+	}
+	return false;
+}
 
 // ─── types ───────────────────────────────────────────────────────────────
 
@@ -376,11 +457,13 @@ async function tick(): Promise<void> {
 	if (!effectiveEnabled()) return;
 
 	const now = Date.now();
-	// Ground truth: any work in flight OR main agent streaming.
+	// Ground truth: any work in flight OR main agent streaming OR pi-crew
+	// background run owned by this session.
 	const isIdleFromCtx = pollIsIdle();
 	const eventWorking = workCount > 0;
 	const streaming = isIdleFromCtx === null ? false : !isIdleFromCtx;
-	const working = eventWorking || streaming;
+	const crewWorking = crewActive();
+	const working = eventWorking || streaming || crewWorking;
 	const next: PiState = working ? "working" : "idle";
 	if (next !== state) {
 			const prev = state;
@@ -553,7 +636,7 @@ function statusText(): string {
 		`workspace: ${workspaceTitle || "(unset)"}   name: ${name}`,
 		`summary: ${summary || "(none)"}`,
 		`schedule: working=[${config.working.join(",")}]  idle=[${config.idle.join(",")}]  tick=${config.tickSeconds}s  grace=${config.graceSeconds}s`,
-		`work: turns=${turnsInFlight} tools=${inFlightTools.size} total=${workCount}  ctx.isIdle=${pollIsIdle() === null ? "?" : pollIsIdle() ? "true" : "false"}`,
+		`work: turns=${turnsInFlight} tools=${inFlightTools.size} total=${workCount}  ctx.isIdle=${pollIsIdle() === null ? "?" : pollIsIdle() ? "true" : "false"}  crew=${crewActive() ? "running" : "idle"}`,
 		`suppression: pause=${pauseStatusText(now)}`,
 		`commands:`,
 		`  /idle                 show this status`,
@@ -599,9 +682,10 @@ export default function idleWatch(pi: ExtensionAPI): void {
 		workspaceTitle = await resolveWorkspaceTitle(pi);
 		surfaceTitle = await resolveSurfaceTitle(pi);
 
-		// Seed initial state from ctx.isIdle() so the first tick is accurate.
+		// Seed initial state from ctx.isIdle() + crew so the first tick is accurate.
 		const observed = pollIsIdle();
-		if (observed !== null) state = observed ? "idle" : "working";
+		const observedIdle = observed === null ? true : observed;
+		state = observedIdle && !crewActive() ? "idle" : "working";
 
 		if (timer) clearInterval(timer);
 		timer = setInterval(() => {

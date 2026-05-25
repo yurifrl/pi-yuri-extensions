@@ -23,12 +23,14 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "supplemental-notifications": () => import("./modules/supplemental-notifications.ts"),
   update: () => import("./modules/update.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
+  respond: () => import("./modules/respond.ts"),
   draft: () => import("./modules/draft.ts"),
   "greetings": () => import("./modules/greetings.ts"),
   gastown: () => import("./modules/gastown.ts"),
   aws: () => import("./modules/aws.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
   "idle-watch": () => import("./modules/idle-watch.ts"),
+  helpy: () => import("./modules/helpy.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
