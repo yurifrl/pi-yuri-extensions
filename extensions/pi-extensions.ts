@@ -31,6 +31,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   memwatch: () => import("./modules/memwatch.ts"),
   "idle-watch": () => import("./modules/idle-watch.ts"),
   helpy: () => import("./modules/helpy.ts"),
+  "pi-beads": () => import("./modules/pi-beads.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
