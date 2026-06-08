@@ -4,16 +4,19 @@
  * Behaviour:
  *   - Runs `bd prime` on session_start and session_before_compact and injects
  *     the output into the conversation (mirrors the Claude Code hook).
- *   - Provides a `/beads` slash command with subcommands:
+ *   - Provides a `/bd` slash command with subcommands:
  *
- *       /beads hook on|off|status        Toggle the bd-prime hook globally
- *       /beads create                    Open an in-process form overlay (pi-tui)
- *       /beads list [args...]            Run `bd list` and inject the output
- *       /beads ready                     Run `bd ready` and inject the output
- *       /beads show <id>                 Run `bd show <id>` and inject the output
- *       /beads close <id> [reason]       Run `bd close` and inject the output
- *       /beads update <id> <args...>     Run `bd update` and inject the output
- *       /beads <anything>                Pass-through: runs `bd <anything>`
+ *       /bd hook on|off|status         Toggle the bd-prime hook globally
+ *       /bd create [title] [k=v ...]   No title: open form overlay; with title: create inline
+ *       /bd dispatch <title> [k=v ...] Create a bead + hand it to a background Agent subagent
+ *       /bd dispatches                 Show queued dispatches (boundary mode)
+ *       /bd list [args...]             Run `bd list` and inject the output
+ *       /bd ready                      Run `bd ready` and inject the output
+ *       /bd show <id>                  Run `bd show <id>` and inject the output
+ *       /bd close <id> [reason]        Run `bd close` and inject the output
+ *       /bd update <id> <args...>      Run `bd update` and inject the output
+ *       /bd <anything>                 Pass-through: runs `bd <anything>`
+ *     (also: /bdd <title> — shortcut for /bd dispatch)
  *
  *   - All handlers return IMMEDIATELY (fire-and-forget). The chat is never
  *     blocked waiting for `bd` to finish; results are delivered later via
@@ -23,12 +26,12 @@
  *   - Global: ~/.pi/agent/extensions/pi-extensions.json  → "pi-beads".hook = true|false
  *   - Loader gate (separate): "extensions"."pi-beads" controls whether the
  *     module is loaded at all by the pi-extensions hub. Don't toggle that
- *     from /beads — turning it off would also kill the /beads command.
+ *     from /bd — turning it off would also kill the /bd command.
  *
  * Skips priming silently when:
  *   - `bd` is not on PATH
  *   - cwd has no `.beads/` directory walking up 8 parents
- *   - in-memory `disabled` flag is set (set by `/beads hook off` for current session)
+ *   - in-memory `disabled` flag is set (set by `/bd hook off` for current session)
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
@@ -47,7 +50,7 @@ const EXEC_TIMEOUT_MS = 8_000;
 const BD_RUN_TIMEOUT_MS = 30_000;
 const GLOBAL_TOGGLE_PATH = join(homedir(), ".pi", "agent", "extensions", "pi-extensions.json");
 
-// In-memory override so `/beads hook off` takes effect immediately. Initialised
+// In-memory override so `/bd hook off` takes effect immediately. Initialised
 // from the on-disk config so a fresh session inherits the saved choice.
 let disabled = false;
 try { disabled = !((): boolean => {
@@ -176,7 +179,7 @@ function ctxCwd(ctx: any): string {
 
 /**
  * Run `bd <args>` in the background; deliver the result as a follow-up user
- * message tagged so the assistant knows it came from /beads. Fire-and-forget.
+ * message tagged so the assistant knows it came from /bd. Fire-and-forget.
  */
 function runAndInject(pi: ExtensionAPI, ctx: any, label: string, args: string[]) {
   const cwd = ctxCwd(ctx);
@@ -192,7 +195,7 @@ function runAndInject(pi: ExtensionAPI, ctx: any, label: string, args: string[])
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /beads create — pi-tui form overlay
+// /bd create — pi-tui form overlay
 // ──────────────────────────────────────────────────────────────────────────────
 
 const BD_TYPES = ["task", "feature", "bug", "chore", "epic", "decision"] as const;
@@ -297,19 +300,20 @@ async function openCreateForm(ctx: any): Promise<BdFormResult> {
         return;
       }
 
+      // Global: Enter confirms/submits from ANY field (matches the on-screen
+      // hint "Enter confirm"). Title is required — if it's still empty, jump to
+      // the Title field so the user can type instead of silently doing nothing.
+      // Field-to-field navigation is Tab / Shift-Tab (and arrows on selects).
+      if (matchesKey(data, Key.enter)) {
+        syncAllValues();
+        if (values.title.trim()) { submit(false); return; }
+        fieldIndex = 0;
+        refresh();
+        return;
+      }
+
       // Submit row
       if (isSubmitRow()) {
-        if (matchesKey(data, Key.enter)) {
-          syncAllValues();
-          if (!values.title.trim()) {
-            // bounce back to title
-            fieldIndex = 0;
-            refresh();
-            return;
-          }
-          submit(false);
-          return;
-        }
         if (matchesKey(data, Key.tab) || matchesKey(data, Key.down)) { moveField(1); return; }
         if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.up)) { moveField(-1); return; }
         return;
@@ -342,12 +346,10 @@ async function openCreateForm(ctx: any): Promise<BdFormResult> {
           values[field.id] = opts[n];
           refresh(); return;
         }
-        if (matchesKey(data, Key.enter)) { moveField(1); return; }
         return;
       }
 
-      // text field: route to its Editor; Enter advances field (no newlines)
-      if (matchesKey(data, Key.enter)) { moveField(1); return; }
+      // text field: route to its Editor (Enter handled globally above as submit)
       const ed = editors.get(field.id);
       if (ed) {
         ed.handleInput(data);
@@ -362,7 +364,7 @@ async function openCreateForm(ctx: any): Promise<BdFormResult> {
       const add = (s: string) => lines.push(truncateToWidth(s, width));
 
       add(theme.fg("accent", "─".repeat(width)));
-      add(theme.fg("accent", theme.bold(" /beads create — new issue")));
+      add(theme.fg("accent", theme.bold(" /bd create — new issue")));
       add("");
 
       for (let i = 0; i < FORM_FIELDS.length; i++) {
@@ -431,35 +433,163 @@ function buildCreateArgs(form: BdFormResult): string[] {
   return args;
 }
 
+// Inline create parser for /bd create: free-text tokens become the title,
+// `key=value` tokens become `--key value` flags. Multi-word values must be
+// quoted, e.g. description="some longer text".
+const CREATE_KEY_ALIASES: Record<string, string> = {
+  d: "description", desc: "description", description: "description",
+  t: "type", type: "type",
+  p: "priority", prio: "priority", priority: "priority",
+  l: "labels", label: "labels", labels: "labels",
+  a: "assignee", assignee: "assignee",
+  s: "status", status: "status",
+};
+
+function parseInlineCreate(rest: string[]): { title: string; flags: string[] } {
+  const titleParts: string[] = [];
+  const flags: string[] = [];
+  for (const tok of rest) {
+    const m = tok.match(/^([a-zA-Z][\w-]*)=(.*)$/);
+    if (m) {
+      const key = CREATE_KEY_ALIASES[m[1].toLowerCase()] ?? m[1].toLowerCase();
+      flags.push(`--${key}`, m[2]);
+    } else {
+      titleParts.push(tok);
+    }
+  }
+  return { title: titleParts.join(" ").trim(), flags };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// /bd dispatch — create a bead and hand it to a background Agent subagent
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// Uses pi's existing Agent (subagent) mechanism rather than a separate OS
+// process: we create the bead, then inject a follow-up message instructing the
+// MAIN agent to launch a background `Agent` (run_in_background: true) that works
+// the bead. pi reports the subagent's completion natively. Whatever agent
+// runner is installed surfaces the running agent in its own widget.
+//
+// Two modes (config: ~/.pi/agent/extensions/pi-extensions.json → "pi-beads".dispatchMode):
+//   - "immediate" (default): inject the launch instruction right after creating
+//     the bead.
+//   - "boundary": queue the bead and inject the instruction at the next
+//     agent_end (turn boundary), so dispatch never interrupts an in-flight turn.
+
+type DispatchMode = "immediate" | "boundary";
+
+function getDispatchMode(): DispatchMode {
+  const v = readToggleConfig()?.["pi-beads"]?.dispatchMode;
+  return v === "boundary" ? "boundary" : "immediate";
+}
+
+// Boundary-mode queue (in-memory, per session). Each entry is a bead awaiting a
+// launch instruction at the next agent_end.
+interface QueuedDispatch { id: string; title: string; cwd: string; }
+const dispatchQueue: QueuedDispatch[] = [];
+
+/**
+ * The follow-up message that tells the main agent to spin up a background
+ * Agent subagent for a bead. Written as an instruction the model acts on.
+ */
+function buildAgentInstruction(items: QueuedDispatch[]): string {
+  const lines: string[] = [
+    `<pi-beads-dispatch count="${items.length}">`,
+    `Dispatch request: hand the following bead(s) to background subagents, then return to whatever you were doing. Do NOT do the work yourself.`,
+    ``,
+    `For EACH bead below, call the \`Agent\` tool with run_in_background: true:`,
+    `  • subagent_type: "general-purpose"`,
+    `  • description: a 3-5 word summary`,
+    `  • prompt: "Work on beads issue <id> — <title>. Run \\\`bd show <id>\\\` for full details, mark it in_progress, do the work. Do NOT git commit or git push — leave changes in the working tree. Record progress with \\\`bd update <id> --notes ...\\\`; if fully done \\\`bd close <id> --reason ...\\\`. End with a 2-4 line summary."`,
+    ``,
+    `Launch them in a single message (multiple Agent tool calls, each run_in_background: true) so they run in parallel. After launching, briefly note the dispatched agent id(s) and resume your prior task. pi will report each subagent's result when it finishes.`,
+    ``,
+    `Beads to dispatch:`,
+  ];
+  for (const it of items) lines.push(`  - ${it.id} — ${it.title}`);
+  lines.push(`</pi-beads-dispatch>`);
+  return lines.join("\n");
+}
+
+/**
+ * Create the bead, then route it to a background Agent subagent (immediately or
+ * at the next turn boundary, per config). Never blocks the slash-command
+ * handler.
+ */
+function dispatchAgent(pi: ExtensionAPI, ctx: any, title: string, flags: string[]) {
+  const cwd = ctxCwd(ctx);
+  notify(ctx, `📮 dispatching “${title}” …`, "info");
+
+  void runBd(["create", title, ...flags, "--json"], cwd).then((r) => {
+    if (!r.ok) {
+      notify(ctx, `❌ /bd dispatch: bd create failed (${r.stderr || r.code})`, "error");
+      return;
+    }
+    let id = "";
+    try { id = JSON.parse(r.stdout)?.id ?? ""; } catch { /* fall through */ }
+    if (!id) {
+      notify(ctx, `❌ /bd dispatch: could not read new bead id from bd output.`, "error");
+      return;
+    }
+
+    // Mark in progress (best effort, non-blocking).
+    void runBd(["update", id, "--status", "in_progress"], cwd);
+
+    const item: QueuedDispatch = { id, title, cwd };
+    if (getDispatchMode() === "boundary") {
+      dispatchQueue.push(item);
+      notify(ctx, `🤖 ${id} queued — I'll hand it to a background agent at the next turn boundary.`, "success");
+    } else {
+      notify(ctx, `🤖 ${id} dispatched to a background agent.`, "success");
+      injectFollowUp(pi, buildAgentInstruction([item]));
+    }
+  });
+}
+
+/**
+ * Boundary mode: at agent_end, hand any queued beads (for this cwd) to a
+ * background agent via a single follow-up instruction, then clear them.
+ */
+function drainDispatchQueue(pi: ExtensionAPI, cwd: string) {
+  const items = dispatchQueue.filter((q) => q.cwd === cwd);
+  if (!items.length) return;
+  // Remove the drained items from the queue.
+  for (const it of items) {
+    const i = dispatchQueue.indexOf(it);
+    if (i >= 0) dispatchQueue.splice(i, 1);
+  }
+  injectFollowUp(pi, buildAgentInstruction(items));
+}
+
 async function dispatchCreate(pi: ExtensionAPI, ctx: any) {
   if (!ctx?.hasUI) {
-    notify(ctx, "/beads create needs an interactive UI. Try `bd create-form` directly.", "warning");
+    notify(ctx, "/bd create needs an interactive UI. Try `bd create-form` directly.", "warning");
     return;
   }
   const form = await openCreateForm(ctx);
   if (form.cancelled) {
-    notify(ctx, "✋ /beads create cancelled.", "info");
+    notify(ctx, "✋ /bd create cancelled.", "info");
     return;
   }
   if (!form.title.trim()) {
-    notify(ctx, "/beads create: title is required.", "warning");
+    notify(ctx, "/bd create: title is required.", "warning");
     return;
   }
   runAndInject(pi, ctx, "create", buildCreateArgs(form));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /beads hook on|off|status
+// /bd hook on|off|status
 // ──────────────────────────────────────────────────────────────────────────────
 
 const HOOK_HELP = [
-  "/beads hook — control the bd-prime session hook",
+  "/bd hook — control the bd-prime session hook",
   "",
-  "  /beads hook            Show current state (alias of status)",
-  "  /beads hook status     Show current state",
-  "  /beads hook on         Enable globally",
-  "  /beads hook off        Disable globally + current session",
-  "  /beads hook toggle     Flip current state (on ↔ off)",
+  "  /bd hook            Show current state (alias of status)",
+  "  /bd hook status     Show current state",
+  "  /bd hook on         Enable globally",
+  "  /bd hook off        Disable globally + current session",
+  "  /bd hook toggle     Flip current state (on ↔ off)",
   "",
   `config: ${GLOBAL_TOGGLE_PATH}`,
 ].join("\n");
@@ -550,19 +680,132 @@ function tokenize(s: string): string[] {
 // ──────────────────────────────────────────────────────────────────────────────
 
 const HELP_TEXT = [
-  "/beads — beads (bd) integration",
+  "/bd — beads (bd) integration",
   "",
-  "  /beads hook [on|off|toggle|status]   Control the bd-prime session hook",
-  "  /beads create               Open a form overlay to create a new issue",
-  "  /beads ready                Show ready work (`bd ready`)",
-  "  /beads list [args...]       Run `bd list ...`",
-  "  /beads show <id>            Run `bd show <id>`",
-  "  /beads close <id> [reason]  Run `bd close <id> [reason]`",
-  "  /beads update <id> ...      Run `bd update <id> ...`",
-  "  /beads <anything>           Pass-through: runs `bd <anything>`",
+  "  /bd hook [on|off|toggle|status]    Control the bd-prime session hook",
+  "  /bd create                         Open a form overlay to create a new issue",
+  "  /bd create <title> [key=value ...] Create inline (free text → title; key=value → bd flags)",
+  "                                     e.g. /bd create fix login bug priority=1 description=\"cannot log in\"",
+  "  /bd dispatch <title> [key=value ...]  Create a bead AND hand it to a background",
+  "                                        Agent subagent. Non-blocking.",
+  "  /bdd <title> [key=value ...]       Shortcut for /bd dispatch.",
+  "  /bd dispatches                     Show queued dispatches (boundary mode).",
+  "  /bd ready                          Show ready work (`bd ready`)",
+  "  /bd list [args...]                 Run `bd list ...`",
+  "  /bd show <id>                      Run `bd show <id>`",
+  "  /bd close <id> [reason]            Run `bd close <id> [reason]`",
+  "  /bd update <id> ...                Run `bd update <id> ...`",
+  "  /bd <anything>                     Pass-through: runs `bd <anything>`",
   "",
   "All subcommands run asynchronously — the chat is never blocked.",
 ].join("\n");
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Shared dispatch (the /bd command handler)
+// ──────────────────────────────────────────────────────────────────────────────
+
+function dispatch(pi: ExtensionAPI, args: string, ctx: any) {
+  const tokens = tokenize((args ?? "").trim());
+  const sub = (tokens[0] ?? "").toLowerCase();
+  const rest = tokens.slice(1);
+  const cmd = "bd";
+
+  // Fire-and-forget: start work, return immediately so the chat keeps moving.
+  try {
+    if (sub === "" || sub === "help" || sub === "?" || sub === "-h" || sub === "--help") {
+      notify(ctx, HELP_TEXT, "info");
+      return;
+    }
+
+    if (sub === "hook") {
+      dispatchHook(ctx, rest.join(" "));
+      return;
+    }
+
+    if (sub === "create") {
+      const { title, flags } = parseInlineCreate(rest);
+      if (!title) {
+        // No title given → open the interactive form overlay.
+        void dispatchCreate(pi, ctx);
+        return;
+      }
+      runAndInject(pi, ctx, "create", ["create", title, ...flags]);
+      return;
+    }
+
+    if (sub === "dispatch") {
+      const { title, flags } = parseInlineCreate(rest);
+      if (!title) {
+        notify(ctx, `/${cmd} dispatch <title> [key=value ...]  — creates a bead and hands it to a background agent (non-blocking).`, "warning");
+        return;
+      }
+      dispatchAgent(pi, ctx, title, flags);
+      return;
+    }
+
+    if (sub === "dispatches" || sub === "queue" || sub === "jobs") {
+      const cwd = ctxCwd(ctx);
+      const queued = dispatchQueue.filter((q) => q.cwd === cwd);
+      if (queued.length) {
+        notify(ctx, `bd dispatch: ${queued.length} bead(s) queued (mode=${getDispatchMode()}). Draining now …`, "info");
+        drainDispatchQueue(pi, cwd);
+      } else {
+        notify(ctx, `bd dispatch: nothing queued (mode=${getDispatchMode()}). Running agents appear in your agent runner's widget.`, "info");
+      }
+      return;
+    }
+
+    if (sub === "ready") {
+      runAndInject(pi, ctx, "ready", ["ready", ...rest]);
+      return;
+    }
+
+    if (sub === "list") {
+      runAndInject(pi, ctx, "list", ["list", ...rest]);
+      return;
+    }
+
+    if (sub === "show") {
+      if (!rest.length) { notify(ctx, `/${cmd} show <id>`, "warning"); return; }
+      runAndInject(pi, ctx, `show ${rest[0]}`, ["show", ...rest]);
+      return;
+    }
+
+    if (sub === "close") {
+      if (!rest.length) { notify(ctx, `/${cmd} close <id> [reason]`, "warning"); return; }
+      runAndInject(pi, ctx, `close ${rest[0]}`, ["close", ...rest]);
+      return;
+    }
+
+    if (sub === "update") {
+      if (!rest.length) { notify(ctx, `/${cmd} update <id> ...`, "warning"); return; }
+      runAndInject(pi, ctx, `update ${rest[0]}`, ["update", ...rest]);
+      return;
+    }
+
+    // Unknown subcommand: pass through to bd.
+    runAndInject(pi, ctx, [sub, ...rest].join(" "), [sub, ...rest]);
+  } catch (e) {
+    notify(ctx, `/${cmd} error: ${e instanceof Error ? e.message : String(e)}`, "error");
+  }
+}
+
+const ARGUMENT_COMPLETIONS = [
+  { value: "create",      label: "create",      description: "Open form to create a new issue" },
+  { value: "dispatch",    label: "dispatch",    description: "Create a bead + hand it to a background Agent subagent: dispatch <title> [key=value ...]" },
+  { value: "dispatches",  label: "dispatches",  description: "Show queued dispatches (boundary mode)" },
+  { value: "ready",       label: "ready",       description: "Show ready work" },
+  { value: "list",        label: "list",        description: "List issues" },
+  { value: "show",        label: "show",        description: "Show an issue: show <id>" },
+  { value: "close",       label: "close",       description: "Close an issue: close <id> [reason]" },
+  { value: "update",      label: "update",      description: "Update an issue: update <id> ..." },
+  { value: "hook",        label: "hook",        description: "Show bd-prime hook state + help" },
+  { value: "hook on",     label: "hook on",     description: "Enable bd-prime session hook" },
+  { value: "hook off",    label: "hook off",    description: "Disable bd-prime session hook" },
+  { value: "hook toggle", label: "hook toggle", description: "Flip bd-prime hook state (on ↔ off)" },
+  { value: "hook status", label: "hook status", description: "Show bd-prime hook state" },
+  { value: "help",        label: "help",        description: "Show help" },
+];
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Extension entry
@@ -577,78 +820,32 @@ export default function (pi: ExtensionAPI) {
     await prime(pi, ctx, "session_before_compact");
   });
 
-  pi.registerCommand?.("beads", {
-    description: "Beads (bd) integration. Try `/beads`, `/beads create`, `/beads hook status`.",
-    getArgumentCompletions: () => [
-      { value: "create",      label: "create",      description: "Open form to create a new issue" },
-      { value: "ready",       label: "ready",       description: "Show ready work" },
-      { value: "list",        label: "list",        description: "List issues" },
-      { value: "show",        label: "show",        description: "Show an issue: /beads show <id>" },
-      { value: "close",       label: "close",       description: "Close an issue: /beads close <id> [reason]" },
-      { value: "update",      label: "update",      description: "Update an issue: /beads update <id> ..." },
-      { value: "hook",        label: "hook",        description: "Show bd-prime hook state + help" },
-      { value: "hook on",     label: "hook on",     description: "Enable bd-prime session hook" },
-      { value: "hook off",    label: "hook off",    description: "Disable bd-prime session hook" },
-      { value: "hook toggle", label: "hook toggle", description: "Flip bd-prime hook state (on ↔ off)" },
-      { value: "hook status", label: "hook status", description: "Show bd-prime hook state" },
-      { value: "help",        label: "help",        description: "Show /beads help" },
-    ],
+  // Boundary dispatch mode: hand any queued beads to background agents at the
+  // end of a turn — a natural boundary that never interrupts in-flight work.
+  // (Immediate mode injects at dispatch time and leaves the queue empty.)
+  pi.on("agent_end", async (_event, ctx) => {
+    try { drainDispatchQueue(pi, ctxCwd(ctx)); } catch { /* ignore */ }
+  });
+
+  pi.registerCommand?.("bd", {
+    description: "Beads (bd) integration. /bd create [title], /bd dispatch <title>, /bd hook status, /bd <anything>.",
+    getArgumentCompletions: () => ARGUMENT_COMPLETIONS,
+    handler: (args: string, ctx: any) => dispatch(pi, args, ctx),
+  });
+
+  // /bdd — one-word shortcut for `/bd dispatch`. The entire argument string is
+  // the title; key=value tokens become bd flags. Creates a bead and hands it
+  // to a background agent without blocking the chat.
+  pi.registerCommand?.("bdd", {
+    description: "Dispatch: create a bead + hand it to a background agent. /bdd <title> [key=value …]",
     handler: (args: string, ctx: any) => {
-      const tokens = tokenize((args ?? "").trim());
-      const sub = (tokens[0] ?? "").toLowerCase();
-      const rest = tokens.slice(1);
-
-      // Fire-and-forget: start work, return immediately so the chat keeps moving.
-      try {
-        if (sub === "" || sub === "help" || sub === "?" || sub === "-h" || sub === "--help") {
-          notify(ctx, HELP_TEXT, "info");
-          return;
-        }
-
-        if (sub === "hook") {
-          dispatchHook(ctx, rest.join(" "));
-          return;
-        }
-
-        if (sub === "create") {
-          // Run in background — await would block the slash-command handler.
-          void dispatchCreate(pi, ctx);
-          return;
-        }
-
-        if (sub === "ready") {
-          runAndInject(pi, ctx, "ready", ["ready", ...rest]);
-          return;
-        }
-
-        if (sub === "list") {
-          runAndInject(pi, ctx, "list", ["list", ...rest]);
-          return;
-        }
-
-        if (sub === "show") {
-          if (!rest.length) { notify(ctx, "/beads show <id>", "warning"); return; }
-          runAndInject(pi, ctx, `show ${rest[0]}`, ["show", ...rest]);
-          return;
-        }
-
-        if (sub === "close") {
-          if (!rest.length) { notify(ctx, "/beads close <id> [reason]", "warning"); return; }
-          runAndInject(pi, ctx, `close ${rest[0]}`, ["close", ...rest]);
-          return;
-        }
-
-        if (sub === "update") {
-          if (!rest.length) { notify(ctx, "/beads update <id> ...", "warning"); return; }
-          runAndInject(pi, ctx, `update ${rest[0]}`, ["update", ...rest]);
-          return;
-        }
-
-        // Unknown subcommand: pass through to bd.
-        runAndInject(pi, ctx, [sub, ...rest].join(" "), [sub, ...rest]);
-      } catch (e) {
-        notify(ctx, `/beads error: ${e instanceof Error ? e.message : String(e)}`, "error");
+      const { title, flags } = parseInlineCreate(tokenize((args ?? "").trim()));
+      if (!title) {
+        notify(ctx, `/bdd <title> [key=value ...]  — e.g. /bdd refactor the parser priority=1 description="split into modules"`, "warning");
+        return;
       }
+      try { dispatchAgent(pi, ctx, title, flags); }
+      catch (e) { notify(ctx, `/bdd error: ${e instanceof Error ? e.message : String(e)}`, "error"); }
     },
   });
 }
