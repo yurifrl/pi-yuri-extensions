@@ -459,7 +459,7 @@ export default function (pi: ExtensionAPI) {
           await handleWip(ctx, cwd);
           break;
         case "status":
-        case "st":
+        case "s":
           await handleStatus(ctx, cwd, subArgs.includes("--porcelain"));
           break;
         case "diff":
@@ -469,12 +469,14 @@ export default function (pi: ExtensionAPI) {
           await handleAdd(ctx, cwd, subArgs);
           break;
         case "commit":
+        case "c":
           await handleCommit(ctx, cwd, subArgs);
           break;
         case "push":
           await handlePush(ctx, cwd, subArgs);
           break;
         case "log":
+        case "l":
           await handleLog(ctx, cwd, subArgs);
           break;
         default:
@@ -483,15 +485,16 @@ export default function (pi: ExtensionAPI) {
             ctx,
             `Git commands:\n` +
               `  /git wip          - Quick commit + push (stage all, commit, push)\n` +
-              `  /git status, st   - Show current status\n` +
+              `  /git status, s    - Show current status\n` +
               `  /git diff [args]  - Show diff (--staged by default)\n` +
               `  /git add [files]  - Stage files (all if none specified)\n` +
-              `  /git commit       - Commit staged changes\n` +
-              `                      --yolo: skip prompts\n` +
+              `  /git commit, c    - Commit staged changes\n` +
+              `                      --yolo: stage, commit, push\n` +
               `                      --yes/-y: auto-confirm\n` +
               `                      --dry-run/-d: preview only\n` +
+              `                      -a: stage all before commit\n` +
               `  /git push         - Push to remote\n` +
-              `  /git log [n]      - Show last n commits (default 10)`,
+              `  /git log, l [n]   - Show last n commits (default 10)`,
             "info"
           );
       }
