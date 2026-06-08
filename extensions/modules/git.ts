@@ -2,16 +2,15 @@
  * git — comprehensive git slashes for pi.
  *
  * Replaces the simple git-wip.ts with multiple subcommands:
- *   /git wip        — Quick commit with `cly gc --yolo`
+ *   /git wip        — Stage, commit, and push (equivalent to /git commit --yolo)
  *   /git status, st — Show git status
  *   /git diff       — Show staged/unstaged diff
  *   /git add        — Stage files interactively
- *   /git commit     — Commit with AI split/merge options
+ *   /git commit     — Commit with --yolo, --yes, --dry-run, -a flags
  *   /git push       — Push changes
  *   /git log        — Show recent commits
  *
- * The commit flow includes interaction options to revise splits,
- * similar to cly git-commits behavior.
+ * All operations use native git commands (no external dependencies).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -110,9 +109,7 @@ async function runGit(cwd: string, ...args: string[]): Promise<RunResult> {
   return runCommand("git", args, cwd);
 }
 
-async function runCly(cwd: string, ...args: string[]): Promise<RunResult> {
-  return runCommand("cly", args, cwd);
-}
+
 
 function notify(
   ctx: any,
@@ -296,37 +293,81 @@ async function handleAdd(ctx: any, cwd: string, args: string[]) {
 }
 
 async function handleCommit(ctx: any, cwd: string, args: string[]) {
-  // Check if we have staged changes
-  const status = await getStatus(cwd);
-  if (status.staged.length === 0) {
-    notify(ctx, "No staged changes to commit. Run /git add first or use /git wip", "warning");
-    return;
-  }
-
   const useYolo = args.includes("--yolo");
   const useYes = args.includes("--yes") || args.includes("-y");
   const dryRun = args.includes("--dry-run") || args.includes("-d");
+  const commitAll = args.includes("-a");
 
-  // For pi, we'll use cly gc command with appropriate flags
-  const gcArgs = ["gc"];
-  if (useYolo) gcArgs.push("--yolo");
-  if (useYes) gcArgs.push("--yes");
-  if (dryRun) gcArgs.push("--dry-run");
+  // For yolo mode: stage all, commit, push
+  if (useYolo) {
+    // Stage all changes first
+    const addResult = await runGit(cwd, "add", "-A");
+    if (!addResult.ok) {
+      notify(ctx, `❌ Failed to stage changes: ${addResult.stderr}`, "error");
+      return;
+    }
 
-  // Custom prompt if provided after --
-  const dashIndex = args.indexOf("--");
-  if (dashIndex >= 0 && dashIndex < args.length - 1) {
-    const customPrompt = args.slice(dashIndex + 1).join(" ");
-    gcArgs.push("--prompt", customPrompt);
+    // Check if there's anything to commit
+    const status = await getStatus(cwd);
+    if (dryRun) {
+      notify(ctx, `Dry run - would commit ${status.staged.length} staged file(s)`, "info");
+      return;
+    }
+
+    if (status.staged.length === 0) {
+      notify(ctx, "Nothing to commit - working tree clean", "info");
+      return;
+    }
+
+    // Commit
+    const commitMsg = `wip :zap:`;
+    const commitResult = await runGit(cwd, "commit", "-m", commitMsg);
+    if (!commitResult.ok) {
+      notify(ctx, `❌ Commit failed: ${commitResult.stderr}`, "error");
+      return;
+    }
+
+    // Push
+    const pushResult = await runGit(cwd, "push");
+    if (pushResult.ok) {
+      notify(ctx, `✅ WIP committed and pushed`, "success");
+    } else {
+      notify(ctx, `✅ Committed, but push failed: ${pushResult.stderr}`, "warning");
+    }
+    return;
   }
 
-  notify(ctx, `Running: cly ${gcArgs.join(" ")}...`, "info");
-  const result = await runCly(cwd, ...gcArgs);
+  // Normal commit flow
+  if (commitAll) {
+    // Stage all changes
+    const addResult = await runGit(cwd, "add", "-A");
+    if (!addResult.ok) {
+      notify(ctx, `❌ Failed to stage changes: ${addResult.stderr}`, "error");
+      return;
+    }
+  }
+
+  // Check if we have staged changes
+  const status = await getStatus(cwd);
+  if (status.staged.length === 0) {
+    notify(ctx, "No staged changes to commit. Run /git add first or use /git commit -a", "warning");
+    return;
+  }
+
+  if (dryRun) {
+    const diff = await runGit(cwd, "diff", "--cached");
+    notify(ctx, `Dry run - would commit ${status.staged.length} file(s):\n${diff.stdout || "(no diff)"}`, "info");
+    return;
+  }
+
+  // Simple commit with default message
+  const commitMsg = `wip :zap:`;
+  const result = await runGit(cwd, "commit", "-m", commitMsg);
 
   if (result.ok) {
-    notify(ctx, `Commit completed:\n${result.stdout}`, "success");
+    notify(ctx, `✅ Committed: ${commitMsg}`, "success");
   } else {
-    notify(ctx, `Commit failed:\n${result.stderr}`, "error");
+    notify(ctx, `❌ Commit failed: ${result.stderr}`, "error");
   }
 }
 
@@ -356,25 +397,19 @@ async function handleLog(ctx: any, cwd: string, args: string[]) {
 }
 
 async function handleWip(ctx: any, cwd: string) {
-  notify(ctx, "Running `cly gc --yolo` (stage all, commit, push)...", "info");
-  const result = await runCly(cwd, "gc", "--yolo");
-
-  if (result.ok) {
-    notify(ctx, `✅ WIP commit completed:\n${result.stdout || "Committed and pushed"}`, "success");
-  } else {
-    notify(ctx, `❌ WIP commit failed:\n${result.stderr || result.stdout}`, "error");
-  }
+  // /git wip is just /git commit --yolo
+  await handleCommit(ctx, cwd, ["--yolo"]);
 }
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("git", {
     description:
-      "Git commands: /git wip (quick commit), /git status|st, /git diff, /git add [files], /git commit [--yolo|--yes|--dry-run], /git push, /git log [n]",
+      "Git commands: /git wip (stage, commit, push), /git status|st, /git diff, /git add [files], /git commit [--yolo|--yes|--dry-run], /git push, /git log [n]",
     getArgumentCompletions: () => [
       {
         value: "wip",
         label: "wip",
-        description: "Quick commit and push with `cly gc --yolo`",
+        description: "Quick commit and push (stage all, commit, push)",
       },
       {
         value: "status",
@@ -447,15 +482,14 @@ export default function (pi: ExtensionAPI) {
           notify(
             ctx,
             `Git commands:\n` +
-              `  /git wip          - Quick commit + push (cly gc --yolo)\n` +
+              `  /git wip          - Quick commit + push (stage all, commit, push)\n` +
               `  /git status, st   - Show current status\n` +
               `  /git diff [args]  - Show diff (--staged by default)\n` +
               `  /git add [files]  - Stage files (all if none specified)\n` +
-              `  /git commit       - AI-powered commit with split\n` +
+              `  /git commit       - Commit staged changes\n` +
               `                      --yolo: skip prompts\n` +
               `                      --yes/-y: auto-confirm\n` +
               `                      --dry-run/-d: preview only\n` +
-              `                      -- <prompt>: custom split guidance\n` +
               `  /git push         - Push to remote\n` +
               `  /git log [n]      - Show last n commits (default 10)`,
             "info"
