@@ -7,8 +7,10 @@
  *   - Provides a `/bd` slash command with subcommands:
  *
  *       /bd hook on|off|status         Toggle the bd-prime hook globally
- *       /bd create [title] [k=v ...]   No title: open form overlay; with title: create inline
- *       /bd dispatch <title> [k=v ...] Create a bead + hand it to a background Agent subagent
+ *       /bd create [title] [k=v ...]   No title: open form overlay. Either way the
+ *                                      bead is CREATED by a background agent (big
+ *                                      descriptions never touch the command line).
+ *       /bd dispatch <title> [k=v ...] Hand bead creation AND its work to a background Agent subagent
  *       /bd dispatches                 Show queued dispatches (boundary mode)
  *       /bd list [args...]             Run `bd list` and inject the output
  *       /bd ready                      Run `bd ready` and inject the output
@@ -422,15 +424,15 @@ async function openCreateForm(ctx: any): Promise<BdFormResult> {
   });
 }
 
-function buildCreateArgs(form: BdFormResult): string[] {
-  const args = ["create", form.title, "--type", form.type, "--priority", form.priority];
-  if (form.description.trim()) {
-    args.push("--description", form.description);
-  }
-  if (form.labels.trim()) {
-    args.push("--labels", form.labels);
-  }
-  return args;
+// Turn the form result into a title + bd flag array (excluding the positional
+// title). The description is kept as a normal `--description` flag here; the
+// dispatch layer splits it back out and routes the big text via a temp file so
+// it never rides on the command line.
+function formToTitleFlags(form: BdFormResult): { title: string; flags: string[] } {
+  const flags = ["--type", form.type, "--priority", form.priority];
+  if (form.description.trim()) flags.push("--description", form.description);
+  if (form.labels.trim()) flags.push("--labels", form.labels);
+  return { title: form.title, flags };
 }
 
 // Inline create parser for /bd create: free-text tokens become the title,
@@ -461,20 +463,28 @@ function parseInlineCreate(rest: string[]): { title: string; flags: string[] } {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /bd dispatch — create a bead and hand it to a background Agent subagent
+// /bd create & /bd dispatch — hand bead CREATION to a background Agent subagent
 // ──────────────────────────────────────────────────────────────────────────────
 //
-// Uses pi's existing Agent (subagent) mechanism rather than a separate OS
-// process: we create the bead, then inject a follow-up message instructing the
-// MAIN agent to launch a background `Agent` (run_in_background: true) that works
-// the bead. pi reports the subagent's completion natively. Whatever agent
-// runner is installed surfaces the running agent in its own widget.
+// The extension NEVER runs `bd create` itself. Large descriptions overflow the
+// argv limit (and mangle through shell/arg handling), so instead we inject a
+// follow-up message instructing the MAIN agent to launch background `Agent`
+// subagents (run_in_background: true) that perform the creation. The big
+// description rides inside the follow-up message body (no argv limit there); the
+// subagent is told to write it to a temp file and pass `bd create --body-file`,
+// so the text never touches the command line.
 //
-// Two modes (config: ~/.pi/agent/extensions/pi-extensions.json → "pi-beads".dispatchMode):
-//   - "immediate" (default): inject the launch instruction right after creating
-//     the bead.
-//   - "boundary": queue the bead and inject the instruction at the next
-//     agent_end (turn boundary), so dispatch never interrupts an in-flight turn.
+//   - Plain create (/bd create, /bd create <title …>): the subagent just
+//     creates the bead and reports its id (work=false).
+//   - Dispatch (/bd dispatch, /bdd): the subagent creates the bead AND works it
+//     (work=true).
+//
+// Two modes for the dispatch (work) flow
+// (config: ~/.pi/agent/extensions/pi-extensions.json → "pi-beads".dispatchMode):
+//   - "immediate" (default): inject the instruction right away.
+//   - "boundary": queue the request and inject at the next agent_end (turn
+//     boundary), so dispatch never interrupts an in-flight turn.
+// Plain create always injects immediately.
 
 type DispatchMode = "immediate" | "boundary";
 
@@ -483,82 +493,110 @@ function getDispatchMode(): DispatchMode {
   return v === "boundary" ? "boundary" : "immediate";
 }
 
-// Boundary-mode queue (in-memory, per session). Each entry is a bead awaiting a
-// launch instruction at the next agent_end.
-interface QueuedDispatch { id: string; title: string; cwd: string; }
-const dispatchQueue: QueuedDispatch[] = [];
+// A bead awaiting creation by a background agent.
+interface PendingBead {
+  title: string;
+  description: string | null; // big text — routed via temp file, never argv
+  flags: string[];            // remaining bd create flags (no --description)
+  work: boolean;              // true = also work the bead after creating it
+  cwd: string;
+}
+
+// Boundary-mode queue (in-memory, per session) for work=true dispatches.
+const pendingQueue: PendingBead[] = [];
+
+// Pull --description/-d out of a flag array so the (possibly huge) text can be
+// routed through a temp file instead of the command line.
+function splitDescription(flags: string[]): { description: string | null; flags: string[] } {
+  const out: string[] = [];
+  let description: string | null = null;
+  for (let i = 0; i < flags.length; i++) {
+    const f = flags[i];
+    if (f === "--description" || f === "-d") {
+      description = flags[i + 1] ?? "";
+      i++; // skip the value too
+      continue;
+    }
+    out.push(f);
+  }
+  return { description, flags: out };
+}
 
 /**
- * The follow-up message that tells the main agent to spin up a background
- * Agent subagent for a bead. Written as an instruction the model acts on.
+ * The follow-up message that tells the main agent to spin up background Agent
+ * subagents to CREATE (and optionally work) the given beads. The description
+ * text is embedded verbatim so the subagent can write it to a temp file —
+ * keeping big text off the command line entirely.
  */
-function buildAgentInstruction(items: QueuedDispatch[]): string {
+function buildCreateInstruction(items: PendingBead[]): string {
+  const anyWork = items.some((i) => i.work);
   const lines: string[] = [
-    `<pi-beads-dispatch count="${items.length}">`,
-    `Dispatch request: hand the following bead(s) to background subagents, then return to whatever you were doing. Do NOT do the work yourself.`,
+    `<pi-beads-create count="${items.length}">`,
+    `Create the following beads issue(s) by dispatching background subagents, then return to whatever you were doing. Do NOT run \`bd create\` yourself in this turn, and NEVER pass a description as a command-line argument — large descriptions overflow the argv limit.`,
     ``,
-    `For EACH bead below, call the \`Agent\` tool with run_in_background: true:`,
+    `For EACH issue below, call the \`Agent\` tool with run_in_background: true:`,
     `  • subagent_type: "general-purpose"`,
     `  • description: a 3-5 word summary`,
-    `  • prompt: "Work on beads issue <id> — <title>. Run \\\`bd show <id>\\\` for full details, mark it in_progress, do the work. Do NOT git commit or git push — leave changes in the working tree. Record progress with \\\`bd update <id> --notes ...\\\`; if fully done \\\`bd close <id> --reason ...\\\`. End with a 2-4 line summary."`,
-    ``,
-    `Launch them in a single message (multiple Agent tool calls, each run_in_background: true) so they run in parallel. After launching, briefly note the dispatched agent id(s) and resume your prior task. pi will report each subagent's result when it finishes.`,
-    ``,
-    `Beads to dispatch:`,
+    `  • prompt: instruct the agent to —`,
+    `      1. Write the issue's DESCRIPTION (provided verbatim below, between the markers) to a temp file, e.g. /tmp/bd-desc-N.md. Skip this if the description is "(none)".`,
+    `      2. Create the bead: \`bd create "<title>" --body-file <tmpfile> <flags> --json\` (omit --body-file when there is no description).`,
+    `      3. Read the new bead id from the JSON output.`,
   ];
-  for (const it of items) lines.push(`  - ${it.id} — ${it.title}`);
-  lines.push(`</pi-beads-dispatch>`);
+  if (anyWork) {
+    lines.push(`      4. If the issue is marked Work: yes — mark it in_progress (\`bd update <id> --status in_progress\`), do the work, record progress with \`bd update <id> --notes ...\`, and \`bd close <id> --reason ...\` when done. Do NOT git commit or git push — leave changes in the working tree.`);
+    lines.push(`      5. End with a 2-4 line summary that includes the new bead id.`);
+  } else {
+    lines.push(`      4. End with a one-line summary that includes the new bead id.`);
+  }
+  lines.push(``);
+  lines.push(`Launch them in a single message (multiple Agent calls, each run_in_background: true) so they run in parallel. After launching, briefly note the dispatched agent id(s) and resume your prior task. pi reports each subagent's result when it finishes.`);
+  lines.push(``);
+  items.forEach((it, i) => {
+    const n = i + 1;
+    lines.push(`───── issue ${n} ─────`);
+    lines.push(`Title: ${it.title}`);
+    lines.push(`Flags: ${it.flags.join(" ") || "(none)"}`);
+    lines.push(`Work: ${it.work ? "yes" : "no"}`);
+    lines.push(`Description (verbatim, between the markers — do not include the markers):`);
+    lines.push(`<<<BD-DESC-${n}`);
+    lines.push(it.description && it.description.trim() ? it.description : "(none)");
+    lines.push(`BD-DESC-${n}`);
+  });
+  lines.push(`</pi-beads-create>`);
   return lines.join("\n");
 }
 
 /**
- * Create the bead, then route it to a background Agent subagent (immediately or
- * at the next turn boundary, per config). Never blocks the slash-command
- * handler.
+ * Route a bead CREATION request to a background Agent subagent — immediately, or
+ * (for work=true dispatches in boundary mode) at the next turn boundary. Never
+ * runs `bd create` itself and never blocks the slash-command handler.
  */
-function dispatchAgent(pi: ExtensionAPI, ctx: any, title: string, flags: string[]) {
+function dispatchAgent(pi: ExtensionAPI, ctx: any, title: string, flags: string[], work = true) {
   const cwd = ctxCwd(ctx);
-  notify(ctx, `📮 dispatching “${title}” …`, "info");
+  const { description, flags: rest } = splitDescription(flags);
+  const item: PendingBead = { title, description, flags: rest, work, cwd };
 
-  void runBd(["create", title, ...flags, "--json"], cwd).then((r) => {
-    if (!r.ok) {
-      notify(ctx, `❌ /bd dispatch: bd create failed (${r.stderr || r.code})`, "error");
-      return;
-    }
-    let id = "";
-    try { id = JSON.parse(r.stdout)?.id ?? ""; } catch { /* fall through */ }
-    if (!id) {
-      notify(ctx, `❌ /bd dispatch: could not read new bead id from bd output.`, "error");
-      return;
-    }
-
-    // Mark in progress (best effort, non-blocking).
-    void runBd(["update", id, "--status", "in_progress"], cwd);
-
-    const item: QueuedDispatch = { id, title, cwd };
-    if (getDispatchMode() === "boundary") {
-      dispatchQueue.push(item);
-      notify(ctx, `🤖 ${id} queued — I'll hand it to a background agent at the next turn boundary.`, "success");
-    } else {
-      notify(ctx, `🤖 ${id} dispatched to a background agent.`, "success");
-      injectFollowUp(pi, buildAgentInstruction([item]));
-    }
-  });
+  if (work && getDispatchMode() === "boundary") {
+    pendingQueue.push(item);
+    notify(ctx, `🤖 “${title}” queued — I'll hand creation to a background agent at the next turn boundary.`, "success");
+    return;
+  }
+  notify(ctx, work ? `📮 handing “${title}” to a background agent (create + work) …` : `📮 handing “${title}” to a background agent to create …`, "info");
+  injectFollowUp(pi, buildCreateInstruction([item]));
 }
 
 /**
- * Boundary mode: at agent_end, hand any queued beads (for this cwd) to a
- * background agent via a single follow-up instruction, then clear them.
+ * Boundary mode: at agent_end, hand any queued creation requests (for this cwd)
+ * to background agents via a single follow-up instruction, then clear them.
  */
 function drainDispatchQueue(pi: ExtensionAPI, cwd: string) {
-  const items = dispatchQueue.filter((q) => q.cwd === cwd);
+  const items = pendingQueue.filter((q) => q.cwd === cwd);
   if (!items.length) return;
-  // Remove the drained items from the queue.
   for (const it of items) {
-    const i = dispatchQueue.indexOf(it);
-    if (i >= 0) dispatchQueue.splice(i, 1);
+    const i = pendingQueue.indexOf(it);
+    if (i >= 0) pendingQueue.splice(i, 1);
   }
-  injectFollowUp(pi, buildAgentInstruction(items));
+  injectFollowUp(pi, buildCreateInstruction(items));
 }
 
 async function dispatchCreate(pi: ExtensionAPI, ctx: any) {
@@ -575,7 +613,8 @@ async function dispatchCreate(pi: ExtensionAPI, ctx: any) {
     notify(ctx, "/bd create: title is required.", "warning");
     return;
   }
-  runAndInject(pi, ctx, "create", buildCreateArgs(form));
+  const { title, flags } = formToTitleFlags(form);
+  dispatchAgent(pi, ctx, title, flags, false);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -683,10 +722,10 @@ const HELP_TEXT = [
   "/bd — beads (bd) integration",
   "",
   "  /bd hook [on|off|toggle|status]    Control the bd-prime session hook",
-  "  /bd create                         Open a form overlay to create a new issue",
-  "  /bd create <title> [key=value ...] Create inline (free text → title; key=value → bd flags)",
+  "  /bd create                         Open a form overlay; a background agent creates the issue",
+  "  /bd create <title> [key=value ...] Create via a background agent (free text → title; key=value → bd flags)",
   "                                     e.g. /bd create fix login bug priority=1 description=\"cannot log in\"",
-  "  /bd dispatch <title> [key=value ...]  Create a bead AND hand it to a background",
+  "  /bd dispatch <title> [key=value ...]  Hand bead creation AND its work to a background",
   "                                        Agent subagent. Non-blocking.",
   "  /bdd <title> [key=value ...]       Shortcut for /bd dispatch.",
   "  /bd dispatches                     Show queued dispatches (boundary mode).",
@@ -729,25 +768,26 @@ function dispatch(pi: ExtensionAPI, args: string, ctx: any) {
         void dispatchCreate(pi, ctx);
         return;
       }
-      runAndInject(pi, ctx, "create", ["create", title, ...flags]);
+      // Hand creation to a background agent (create only, no work).
+      dispatchAgent(pi, ctx, title, flags, false);
       return;
     }
 
     if (sub === "dispatch") {
       const { title, flags } = parseInlineCreate(rest);
       if (!title) {
-        notify(ctx, `/${cmd} dispatch <title> [key=value ...]  — creates a bead and hands it to a background agent (non-blocking).`, "warning");
+        notify(ctx, `/${cmd} dispatch <title> [key=value ...]  — hands creation to a background agent that also works it (non-blocking).`, "warning");
         return;
       }
-      dispatchAgent(pi, ctx, title, flags);
+      dispatchAgent(pi, ctx, title, flags, true);
       return;
     }
 
     if (sub === "dispatches" || sub === "queue" || sub === "jobs") {
       const cwd = ctxCwd(ctx);
-      const queued = dispatchQueue.filter((q) => q.cwd === cwd);
+      const queued = pendingQueue.filter((q) => q.cwd === cwd);
       if (queued.length) {
-        notify(ctx, `bd dispatch: ${queued.length} bead(s) queued (mode=${getDispatchMode()}). Draining now …`, "info");
+        notify(ctx, `bd dispatch: ${queued.length} bead(s) queued for creation (mode=${getDispatchMode()}). Draining now …`, "info");
         drainDispatchQueue(pi, cwd);
       } else {
         notify(ctx, `bd dispatch: nothing queued (mode=${getDispatchMode()}). Running agents appear in your agent runner's widget.`, "info");
@@ -791,8 +831,8 @@ function dispatch(pi: ExtensionAPI, args: string, ctx: any) {
 }
 
 const ARGUMENT_COMPLETIONS = [
-  { value: "create",      label: "create",      description: "Open form to create a new issue" },
-  { value: "dispatch",    label: "dispatch",    description: "Create a bead + hand it to a background Agent subagent: dispatch <title> [key=value ...]" },
+  { value: "create",      label: "create",      description: "Create a new issue via a background agent (form when no title)" },
+  { value: "dispatch",    label: "dispatch",    description: "Hand bead creation + its work to a background Agent subagent: dispatch <title> [key=value ...]" },
   { value: "dispatches",  label: "dispatches",  description: "Show queued dispatches (boundary mode)" },
   { value: "ready",       label: "ready",       description: "Show ready work" },
   { value: "list",        label: "list",        description: "List issues" },
