@@ -33,6 +33,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   helpy: () => import("./modules/helpy.ts"),
   "pi-beads": () => import("./modules/pi-beads.ts"),
   "git": () => import("./modules/git.ts"),
+  thinking: () => import("./modules/thinking.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {

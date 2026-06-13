@@ -21,6 +21,14 @@ export type PiYuConfig = {
 		defaultChromeProfile?: string;
 		browserApp?: string;
 	};
+	bedrock?: {
+		/** 1Password item id holding the per-profile Bedrock API keys. */
+		item?: string;
+		/** 1Password vault id. */
+		vault?: string;
+		/** 1Password account id (shorthand or UUID). */
+		account?: string;
+	};
 	memwatch?: {
 		intervalMinutes?: number;
 		warnMB?: number;
