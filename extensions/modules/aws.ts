@@ -37,14 +37,15 @@ const STATE_COLOR: Record<State, "dim" | "accent" | "warning" | "success" | "err
 // was launched — while AWS_PROFILE is left untouched, so every other AWS call
 // in the process keeps using the ambient SSO credentials.
 //
-// The per-profile tokens live in a 1Password item (one *_BEARER_TOKEN_BEDROCK
-// field per environment section); a top-level DEFAULT field names the default
-// profile. A small 0600 cache avoids paying `op` latency on every launch.
+// The tokens live in a 1Password item with one section per environment
+// (production, staging, ...), each holding a *_BEARER_TOKEN_BEDROCK field. A
+// profile IS a section name; a top-level DEFAULT field names the default
+// section. A small 0600 cache avoids paying `op` latency on every launch.
 
 const BEDROCK_TOKEN_VAR = "AWS_BEARER_TOKEN_BEDROCK";
 const BEDROCK_TOKEN_LEAF = "BEARER_TOKEN_BEDROCK"; // suffix shared by all *_BEARER_TOKEN_BEDROCK labels
-const BEDROCK_DEFAULT_FIELD = "DEFAULT"; // item field whose value names the default profile
-const BEDROCK_FALLBACK_PROFILE = "PRD"; // used only if the DEFAULT field is absent
+const BEDROCK_DEFAULT_FIELD = "DEFAULT"; // item field whose value names the default section/profile
+const BEDROCK_FALLBACK_PROFILE = "production"; // used only if the DEFAULT field is absent
 const BEDROCK_SSO = "sso"; // pseudo-profile: disable the token, fall back to ambient SSO
 // Hardcoded /tmp (not os.tmpdir(), which is /var/folders/... on macOS) to match
 // the user's existing /tmp/1pass-load-envs convention.
@@ -326,8 +327,8 @@ async function fetchBedrockItem(cfg: BedrockCfg): Promise<OpItem> {
   return JSON.parse(raw) as OpItem;
 }
 
-// defaultProfile returns the profile named by the item's top-level DEFAULT
-// field (e.g. "PRD"), or the fallback if that field is absent.
+// defaultProfile returns the section named by the item's top-level DEFAULT
+// field (e.g. "production"), or the fallback if that field is absent.
 function defaultProfile(item: OpItem): string {
   for (const f of item.fields ?? []) {
     if (!f.section && f.label?.toUpperCase() === BEDROCK_DEFAULT_FIELD && f.value) return f.value;
@@ -335,22 +336,17 @@ function defaultProfile(item: OpItem): string {
   return BEDROCK_FALLBACK_PROFILE;
 }
 
-// bearerTokenFor finds a profile's Bedrock token by section: the profile owns
-// the section carrying its prefixed fields (PRD_ACCOUNT, ...); its token is
-// that section's *_BEARER_TOKEN_BEDROCK field. Resolving by section tolerates
-// label variations (PRD_AWS_..., STG_AWS_..., or a bare AWS_BEARER_TOKEN_BEDROCK).
+// bearerTokenFor returns the Bedrock token for a profile, where a profile IS a
+// 1Password section name (e.g. "production"). The token is that section's
+// *_BEARER_TOKEN_BEDROCK field — matched by suffix so a stray label typo
+// (WS_... vs AWS_...) still resolves.
 function bearerTokenFor(item: OpItem, profile: string): string | null {
-  const prefix = profile.toUpperCase() + "_";
-  let section: string | undefined;
   for (const f of item.fields ?? []) {
-    if (f.section?.label && f.label?.toUpperCase().startsWith(prefix)) {
-      section = f.section.label;
-      break;
-    }
-  }
-  if (!section) return null;
-  for (const f of item.fields ?? []) {
-    if (f.section?.label === section && f.label?.toUpperCase().endsWith(BEDROCK_TOKEN_LEAF) && f.value) {
+    if (
+      f.section?.label?.toLowerCase() === profile.toLowerCase() &&
+      f.label?.toUpperCase().endsWith(BEDROCK_TOKEN_LEAF) &&
+      f.value
+    ) {
       return f.value;
     }
   }
