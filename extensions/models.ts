@@ -26,7 +26,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -52,9 +52,38 @@ type ProviderSpec = {
   reasoningFilter?: string; // regex: matching ids get reasoning:true
   modelsPath?: string; // default "/models"
   defaults?: ModelDefaults;
+  cacheTtlSeconds?: number; // how long to reuse the cached discovery (default 12h)
 };
 
 const ZERO_COST: Cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+// Discovery cache. Avoids hitting `op` / the network on every pi startup — the
+// reason 1Password prompts each launch. Stores, per provider, the resolved key
+// and discovered models, refreshed only when older than the TTL (or on a cold
+// cache). 0600 because it holds resolved credentials.
+const CACHE_PATH = "/tmp/1pass-load-envs/models-cache.json";
+const DEFAULT_TTL_SECONDS = 12 * 60 * 60;
+
+type CacheEntry = { ts: number; apiKey: string; models: unknown[] };
+
+function readCacheAll(): Record<string, CacheEntry> {
+  try {
+    return JSON.parse(readFileSync(CACHE_PATH, "utf8")) as Record<string, CacheEntry>;
+  } catch {
+    return {};
+  }
+}
+
+function writeCacheEntry(name: string, entry: CacheEntry): void {
+  try {
+    const all = readCacheAll();
+    all[name] = entry;
+    mkdirSync(path.dirname(CACHE_PATH), { recursive: true, mode: 0o700 });
+    writeFileSync(CACHE_PATH, JSON.stringify(all), { mode: 0o600 });
+  } catch {
+    // a failed cache write just means the next launch re-discovers
+  }
+}
 
 // resolveConfigValue mirrors pi's config-value syntax: a leading "!" runs the
 // rest as a shell command and uses stdout; "$VAR"/"${VAR}" interpolate env;
@@ -99,8 +128,7 @@ type RawModel = {
   max_tokens?: number;
 };
 
-async function discoverModels(spec: ProviderSpec) {
-  const key = resolveConfigValue(spec.apiKey);
+async function fetchModels(spec: ProviderSpec, key: string | undefined) {
   const url = spec.baseUrl.replace(/\/+$/, "") + (spec.modelsPath ?? "/models");
   const headers: Record<string, string> = { ...(spec.headers ?? {}) };
   // The /models endpoint itself needs auth (independent of how chat requests
@@ -131,29 +159,47 @@ async function discoverModels(spec: ProviderSpec) {
     }));
 }
 
-export default async function (pi: ExtensionAPI) {
-  const specs = loadSpecs();
-  for (const spec of specs) {
-    if (!spec?.name || !spec?.baseUrl) continue;
-    try {
-      const models = await discoverModels(spec);
-      if (models.length === 0) {
-        console.error(`[models] ${spec.name}: no models matched (filter: ${spec.filter ?? "<all>"})`);
-        continue;
-      }
-      pi.registerProvider(spec.name, {
-        name: spec.name,
-        baseUrl: spec.baseUrl,
-        api: spec.api ?? "openai-completions",
-        apiKey: spec.apiKey,
-        authHeader: spec.authHeader ?? true,
-        headers: spec.headers,
-        models,
-      });
-    } catch (err) {
-      // Fail soft: a provider that can't be reached (e.g. op locked) is skipped,
-      // leaving any static models.json definition intact.
-      console.error(`[models] ${spec.name}: ${err instanceof Error ? err.message : String(err)}`);
+// resolveProvider returns the key + models to register, using the cache when
+// fresh (no `op`, no network) and otherwise re-discovering. On a failed refresh
+// it falls back to a stale cache rather than dropping the provider.
+async function resolveProvider(spec: ProviderSpec): Promise<{ apiKey: string; models: unknown[] } | null> {
+  const cached = readCacheAll()[spec.name];
+  const ttlMs = (spec.cacheTtlSeconds ?? DEFAULT_TTL_SECONDS) * 1000;
+  if (cached && Date.now() - cached.ts < ttlMs) {
+    return { apiKey: cached.apiKey, models: cached.models };
+  }
+  try {
+    const key = resolveConfigValue(spec.apiKey) ?? "";
+    const models = await fetchModels(spec, key);
+    if (models.length === 0) throw new Error(`no models matched (filter: ${spec.filter ?? "<all>"})`);
+    writeCacheEntry(spec.name, { ts: Date.now(), apiKey: key, models });
+    return { apiKey: key, models };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (cached) {
+      console.error(`[models] ${spec.name}: refresh failed (${msg}); using stale cache`);
+      return { apiKey: cached.apiKey, models: cached.models };
     }
+    console.error(`[models] ${spec.name}: ${msg}`);
+    return null;
+  }
+}
+
+export default async function (pi: ExtensionAPI) {
+  for (const spec of loadSpecs()) {
+    if (!spec?.name || !spec?.baseUrl) continue;
+    const resolved = await resolveProvider(spec);
+    if (!resolved) continue;
+    // Register with the already-resolved key (literal) so pi never re-runs the
+    // `!op read` per request either — credentials are fetched only on refresh.
+    pi.registerProvider(spec.name, {
+      name: spec.name,
+      baseUrl: spec.baseUrl,
+      api: spec.api ?? "openai-completions",
+      apiKey: resolved.apiKey,
+      authHeader: spec.authHeader ?? true,
+      headers: spec.headers,
+      models: resolved.models,
+    });
   }
 }
