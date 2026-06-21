@@ -9,6 +9,7 @@ export default function (pi: ExtensionAPI) {
       const steps = [
         { label: "pnpm", cmd: "pnpm", args: ["up", "-g", "--latest"] },
         { label: "pi", cmd: "pi", args: ["update"] },
+        { label: "pi extensions", cmd: "pi", args: ["update", "--extensions"] },
       ];
 
       ctx.ui.notify("Starting update in background…", "info");

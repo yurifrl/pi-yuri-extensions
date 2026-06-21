@@ -36,7 +36,7 @@ interface Discovered {
 interface SourceGroup {
 	source: string;
 	commands: Discovered[];
-	skills: string[];
+	skills: Discovered[];
 	agents: Discovered[];
 	agentsFiles: string[];
 }
@@ -164,8 +164,8 @@ function scanCommands(dir: string, maxDepth = 0): Discovered[] {
 	return items;
 }
 
-function scanSkills(dir: string, maxDepth = 0): string[] {
-	const names: string[] = [];
+function scanSkills(dir: string, maxDepth = 0): Discovered[] {
+	const items: Discovered[] = [];
 	const seen = new Set<string>();
 	for (const entryPath of walkEntries(dir, maxDepth)) {
 		try {
@@ -176,15 +176,21 @@ function scanSkills(dir: string, maxDepth = 0): string[] {
 			if (!existsSync(skillFile) || !statSync(skillFile).isFile()) continue;
 
 			const name = basename(entryPath);
-			if (!seen.has(name)) {
-				seen.add(name);
-				names.push(name);
-			}
+			if (seen.has(name)) continue;
+			seen.add(name);
+
+			const raw = readFileSync(skillFile, "utf-8");
+			const { description, body } = parseFrontmatter(raw);
+			items.push({
+				name,
+				description: description || body.split("\n").find((l) => l.trim())?.trim() || "",
+				content: raw,
+			});
 		} catch (err) {
 			console.warn(`[cross-agent] scanSkills failed at '${entryPath}':`, err);
 		}
 	}
-	return names;
+	return items;
 }
 
 function scanAgents(dir: string, maxDepth = 0): Discovered[] {
@@ -276,8 +282,8 @@ function extraSourcesFromAllowlist(cwd: string, home: string, allowlist: string[
 function discoverSourceGroup(spec: SourceSpec, depths: { commands: number; skills: number; agents: number }, excludedSkills: Set<string>, seenCrossAgentSkills: Set<string>, loadedAgentsFiles: string[], loadedAgentsContent: string[]): SourceGroup | null {
 	const commands = spec.scanCommands ? scanCommands(join(spec.baseDir, "commands"), depths.commands) : [];
 	const skills = spec.scanSkills
-		? scanSkills(join(spec.baseDir, "skills"), depths.skills).filter((name) => {
-			const variants = [name, `skill:${name}`, `/skill:${name}`];
+		? scanSkills(join(spec.baseDir, "skills"), depths.skills).filter((skill) => {
+			const variants = [skill.name, `skill:${skill.name}`, `/skill:${skill.name}`];
 			if (variants.some((variant) => excludedSkills.has(variant) || seenCrossAgentSkills.has(variant))) return false;
 			for (const variant of variants) seenCrossAgentSkills.add(variant);
 			return true;
@@ -327,7 +333,7 @@ function renderNotification(groups: SourceGroup[], home: string): string {
 		}
 		if (g.skills.length) {
 			lines.push(`    ${dim("skills:")}`);
-			for (const skill of g.skills) lines.push(`      ${yellow("/skill:")}${cyan(skill)}`);
+			for (const skill of g.skills) lines.push(`      ${yellow("/skill:")}${cyan(skill.name)}`);
 		}
 		if (g.agents.length) {
 			lines.push(`    ${dim("agents:")}`);
@@ -338,55 +344,68 @@ function renderNotification(groups: SourceGroup[], home: string): string {
 	return lines.join("\n");
 }
 
-export default function (pi: ExtensionAPI) {
-	let loadedAgentsContent: string[] = [];
+export default async function (pi: ExtensionAPI) {
+	// Discover + register at factory load time. The factory is awaited before
+	// session_start, and pi snapshots registered commands into the autocomplete
+	// provider at startup — registerCommand() inside session_start lands too late
+	// and is silently dropped from autocomplete.
+	const home = homedir();
+	const cwd = process.cwd();
+	const { config } = await readPiYuConfig(cwd);
+	const allowlist = config.crossAgent?.allowlist || [];
+	const configuredCommandDepth = config.crossAgent?.recursiveDepth?.commands;
+	const configuredSkillDepth = config.crossAgent?.recursiveDepth?.skills;
+	const configuredAgentDepth = config.crossAgent?.recursiveDepth?.agents;
+	const depths = {
+		commands: typeof configuredCommandDepth === "number" && configuredCommandDepth > 0 ? configuredCommandDepth : 4,
+		skills: typeof configuredSkillDepth === "number" && configuredSkillDepth >= 0 ? configuredSkillDepth : 1,
+		agents: typeof configuredAgentDepth === "number" && configuredAgentDepth >= 0 ? configuredAgentDepth : 1,
+	};
+	const excludedSkills = collectPiCoreLoadedSkillNames(cwd, home);
+	const seenCrossAgentSkills = new Set<string>();
+	const loadedAgentsContent: string[] = [];
+	const loadedAgentsFiles: string[] = [];
+	const groups: SourceGroup[] = [];
+	const specs = [...defaultSources(cwd, home), ...extraSourcesFromAllowlist(cwd, home, allowlist)];
+
+	for (const spec of specs) {
+		const group = discoverSourceGroup(spec, depths, excludedSkills, seenCrossAgentSkills, loadedAgentsFiles, loadedAgentsContent);
+		if (group) groups.push(group);
+	}
+
+	const seenCmds = new Set<string>();
+	for (const g of groups) {
+		for (const cmd of g.commands) {
+			if (seenCmds.has(cmd.name)) continue;
+			seenCmds.add(cmd.name);
+			pi.registerCommand(cmd.name, {
+				description: `[${g.source}] ${cmd.description}`.slice(0, 120),
+				handler: async (args) => {
+					pi.sendUserMessage(expandArgs(cmd.content, args || ""));
+				},
+			});
+		}
+		for (const skill of g.skills) {
+			const cmdName = `skill:${skill.name}`;
+			if (seenCmds.has(cmdName)) continue;
+			seenCmds.add(cmdName);
+			pi.registerCommand(cmdName, {
+				description: `[${g.source}] ${skill.description}`.slice(0, 120),
+				handler: async (args) => {
+					const task = args?.trim();
+					pi.sendUserMessage(task ? `${skill.content}\n\nTask: ${task}` : skill.content);
+				},
+			});
+		}
+	}
 
 	// --cross-agent-verbose flag registered in pi-extensions.ts (preboot)
 	pi.on("session_start", async (_event, ctx) => {
-		const { config } = await readPiYuConfig(ctx.cwd);
-		const home = homedir();
-		const cwd = ctx.cwd;
-		const allowlist = config.crossAgent?.allowlist || [];
+		if (groups.length === 0) return;
 		const configVerbose = config.crossAgent?.verbose === true;
 		const envVerbose = ["1", "true", "yes", "on"].includes((process.env.PI_CROSS_AGENT_VERBOSE || "").toLowerCase());
 		const flagVerbose = pi.getFlag("cross-agent-verbose") === true;
 		const shouldPrintStartup = flagVerbose || envVerbose || configVerbose;
-		const configuredCommandDepth = config.crossAgent?.recursiveDepth?.commands;
-		const configuredSkillDepth = config.crossAgent?.recursiveDepth?.skills;
-		const configuredAgentDepth = config.crossAgent?.recursiveDepth?.agents;
-		const depths = {
-			commands: typeof configuredCommandDepth === "number" && configuredCommandDepth > 0 ? configuredCommandDepth : 4,
-			skills: typeof configuredSkillDepth === "number" && configuredSkillDepth >= 0 ? configuredSkillDepth : 1,
-			agents: typeof configuredAgentDepth === "number" && configuredAgentDepth >= 0 ? configuredAgentDepth : 1,
-		};
-		const excludedSkills = collectPiCoreLoadedSkillNames(cwd, home);
-		const seenCrossAgentSkills = new Set<string>();
-		loadedAgentsContent = [];
-		const loadedAgentsFiles: string[] = [];
-		const groups: SourceGroup[] = [];
-		const specs = [...defaultSources(cwd, home), ...extraSourcesFromAllowlist(cwd, home, allowlist)];
-
-		for (const spec of specs) {
-			const group = discoverSourceGroup(spec, depths, excludedSkills, seenCrossAgentSkills, loadedAgentsFiles, loadedAgentsContent);
-			if (group) groups.push(group);
-		}
-
-		const seenCmds = new Set<string>();
-		for (const g of groups) {
-			for (const cmd of g.commands) {
-				if (seenCmds.has(cmd.name)) continue;
-				seenCmds.add(cmd.name);
-				pi.registerCommand(cmd.name, {
-					description: `[${g.source}] ${cmd.description}`.slice(0, 120),
-					handler: async (args) => {
-						pi.sendUserMessage(expandArgs(cmd.content, args || ""));
-					},
-				});
-			}
-		}
-
-		if (groups.length === 0) return;
-
 		if (shouldPrintStartup && ctx.hasUI) {
 			setTimeout(() => {
 				ctx.ui.notify(renderNotification(groups, home), "info");
