@@ -19,6 +19,10 @@ export function enableYesMode(): void {
   yesOn = true;
 }
 
+export function disableYesMode(): void {
+  yesOn = false;
+}
+
 export function isYesMode(): boolean {
   return yesOn;
 }
@@ -28,37 +32,56 @@ function envYes(): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
-function buildPermissiveUi(realUi: Record<string, unknown>): Record<string, unknown> {
-  return new Proxy(realUi, {
-    get(target, prop, receiver) {
-      if (prop === "custom") return async () => "allow";
-      if (prop === "select") {
-        return async (_prompt: unknown, options?: readonly unknown[]) => {
-          if (Array.isArray(options) && options.length > 0) return options[0];
-          return "allow";
-        };
-      }
-      if (prop === "confirm") return async () => true;
-      const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") return value.bind(target);
-      return value;
-    },
-  });
+// Saved original methods per shared ui object, so patching is reversible.
+type UiMethods = { custom?: unknown; select?: unknown; confirm?: unknown };
+const originalUi = new WeakMap<object, UiMethods>();
+
+function setMethod(ui: Record<string, unknown>, name: string, fn: unknown): void {
+  try {
+    ui[name] = fn;
+  } catch {
+    // Property may be non-writable (e.g. a class accessor). Force it.
+    Object.defineProperty(ui, name, { value: fn, configurable: true, writable: true });
+  }
 }
 
+// Mutate the shared uiContext object IN PLACE so every extension that later
+// calls ctx.ui.custom/select/confirm (including guardrails) gets auto-approve,
+// regardless of tool_call handler ordering. Patching the per-ctx object inside
+// a tool_call handler races guardrails' own handler; mutating the shared object
+// at session_start does not.
 export function patchCtxUiAllow(ctx: { ui: Record<string, unknown> }): void {
-  Object.defineProperty(ctx, "ui", {
-    value: buildPermissiveUi(ctx.ui),
-    configurable: true,
-    enumerable: true,
-    writable: false,
-  });
+  const ui = ctx?.ui;
+  if (!ui || typeof ui !== "object") return;
+  if (!originalUi.has(ui)) {
+    originalUi.set(ui, { custom: ui.custom, select: ui.select, confirm: ui.confirm });
+  }
+  setMethod(ui, "custom", async () => "allow");
+  setMethod(ui, "select", async (_prompt: unknown, options?: readonly unknown[]) =>
+    Array.isArray(options) && options.length > 0 ? options[0] : "allow",
+  );
+  setMethod(ui, "confirm", async () => true);
+}
+
+export function unpatchCtxUi(ctx: { ui: Record<string, unknown> }): void {
+  const ui = ctx?.ui;
+  if (!ui || typeof ui !== "object") return;
+  const saved = originalUi.get(ui);
+  if (!saved) return;
+  setMethod(ui, "custom", saved.custom);
+  setMethod(ui, "select", saved.select);
+  setMethod(ui, "confirm", saved.confirm);
+  originalUi.delete(ui);
 }
 
 export default function yes(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     if (pi.getFlag?.("yes") === true || envYes()) {
       yesOn = true;
+    }
+    if (yesOn) {
+      // Patch the shared ui now, before any tool_call fires.
+      patchCtxUiAllow(ctx as unknown as { ui: Record<string, unknown> });
       try {
         ctx.ui.notify("✅ YES mode: ON (all prompts auto-approved)", "warning");
       } catch {}
@@ -66,6 +89,7 @@ export default function yes(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", (_event, ctx) => {
+    // Backup: re-assert the patch in case the ui object was rebound mid-session.
     if (!yesOn) return;
     patchCtxUiAllow(ctx as unknown as { ui: Record<string, unknown> });
   });
@@ -102,6 +126,9 @@ export default function yes(pi: ExtensionAPI): void {
       }
 
       yesOn = target;
+      const uiCtx = ctx as unknown as { ui: Record<string, unknown> };
+      if (target) patchCtxUiAllow(uiCtx);
+      else unpatchCtxUi(uiCtx);
       const msg = yesOn ? "✅ YES: ON  (prompts auto-approved)" : "🛡  YES: OFF (prompts active)";
       console.log(msg);
       notify(msg, yesOn ? "warning" : "success");

@@ -34,6 +34,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "pi-beads": () => import("./modules/pi-beads.ts"),
   "git": () => import("./modules/git.ts"),
   thinking: () => import("./modules/thinking.ts"),
+  timeout: () => import("./modules/timeout.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {

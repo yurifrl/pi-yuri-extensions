@@ -11,8 +11,7 @@
   "pi": {
     "extensions": [
       "./extensions/pi-extensions.ts",
-      "./extensions/yolo.ts",
-      "./extensions/models.ts"
+      "./extensions/yolo.ts"
     ],
     "skills": ["./.pi/skills"]
   }

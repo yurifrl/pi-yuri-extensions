@@ -9,7 +9,6 @@ import { type PiYuConfig, readPiYuConfig } from "./lib/config.ts";
 type State = "pending" | "focus" | "running" | "ok" | "error";
 type Row = { profile: string; chrome?: string; state: State; detail?: string; elapsedMs?: number };
 
-const DEFAULT_PROFILES = ["nsx", "staging"];
 const DEFAULT_BROWSER_APP = "Google Chrome";
 const WIDGET_KEY = "aws-login";
 
@@ -106,12 +105,13 @@ export default function (pi: ExtensionAPI) {
       }
 
       const profileArgs = parts.slice(1);
-      const profiles =
-        profileArgs.length > 0
-          ? profileArgs
-          : awsCfg.profiles?.length
-            ? awsCfg.profiles
-            : DEFAULT_PROFILES;
+      const profiles = profileArgs.length > 0 ? profileArgs : awsCfg.profiles ?? [];
+
+      if (profiles.length === 0) {
+        ctx.ui.notify?.("aws: no profiles configured (set awsLogin.profiles or pass profiles)", "error");
+        ctx.ui.setWidget(WIDGET_KEY, undefined);
+        return;
+      }
 
       const chromeProfiles = awsCfg.chromeProfiles ?? {};
       const defaultChrome = awsCfg.defaultChromeProfile;
