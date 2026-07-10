@@ -26,6 +26,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   respond: () => import("./modules/respond.ts"),
   draft: () => import("./modules/draft.ts"),
   "greetings": () => import("./modules/greetings.ts"),
+  "session-id": () => import("./modules/session-id.ts"),
   gastown: () => import("./modules/gastown.ts"),
   aws: () => import("./modules/aws.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
@@ -35,6 +36,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "git": () => import("./modules/git.ts"),
   thinking: () => import("./modules/thinking.ts"),
   timeout: () => import("./modules/timeout.ts"),
+  e: () => import("./modules/e.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {

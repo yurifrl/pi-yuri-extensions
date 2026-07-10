@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-05 Vim File Opener Extension
+- Session ID: f8a7b3c1-5e4f-4a2d-9b8e-6c3a7d9f1e2b
+- Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-DotFiles--/2026-07-05T10-00-00-000Z_f8a7b3c1-5e4f-4a2d-9b8e-6c3a7d9f1e2b.jsonl
+- Session Name: vim-file-opener-extension
+- Context Name: vim-file-opener-extension
+
+### Added
+- `extensions/modules/e.ts` — new `/e` command that works like vim's `/e` command but uses Neovim, supporting absolute paths, relative paths, current directory opening, and `@` prefixed paths
+- Registered `e` module in `MODULE_LOADERS` map in `extensions/pi-extensions.ts`
+- Documentation for `/e` command in README.md
+
+### Changed
+- Updated README.md to include `e` in the list of available module keys
+- Extended Commands documentation in README.md to describe `/e` usage
+
 ## 2026-04-10 Session Summary Widget Above Editor
 - Session ID: 3053243f-d4b5-4738-892c-ca1f887f2b76
 - Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-Workdir-Yuri-pi-my-extensions--/2026-04-10T01-07-28-091Z_3053243f-d4b5-4738-892c-ca1f887f2b76.jsonl

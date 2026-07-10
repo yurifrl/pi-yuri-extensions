@@ -81,6 +81,7 @@ Notes:
 - `confirm-notify`
 - `cross-agent`
 - `damage-control`
+- `e`
 - `minimal`
 - `pi-pi`
 - `greetings`
@@ -128,6 +129,21 @@ If you enable the `checkpoint` module, you also get:
 
 `/checkpoint` is implemented by the extension as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`.
 It resolves the current Pi session from extension context (`ctx.sessionManager`) with a filesystem fallback, then sends a structured user message telling Pi to run the workflow from `~/.agents/skills/ag:checkpoint/SKILL.md` while injecting the real Pi session id as the change id and requiring session save/name/purpose output.
+
+If you enable the `e` module, you also get:
+
+```bash
+/e [filepath]
+```
+
+`/e` opens a file in Neovim, similar to vim's `/e` command:
+
+- `/e filepath` - Opens the specified file
+- `/e .` - Opens the current directory
+- `/e` - Opens the current directory (default)
+- `/e @filepath` - Opens the specified file (same as `filepath`, `@` prefix is optional)
+
+Supports absolute paths, relative paths, and current directory opening.
 
 ## Idle watcher (`idle-watch`)
 
