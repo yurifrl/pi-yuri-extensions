@@ -12,19 +12,22 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-// Module-scope state — shared with yolo.ts via Node module cache.
-let yesOn = false;
+// State lives on globalThis, not a module variable: yolo.ts (a preboot
+// extension) and this module are loaded by different jiti instances
+// (moduleCache: false), so a plain module-level flag would NOT be shared.
+// globalThis is the same object across every jiti instance in the process.
+const YES_KEY = "__PI_YES_MODE__";
 
 export function enableYesMode(): void {
-  yesOn = true;
+  (globalThis as Record<string, unknown>)[YES_KEY] = true;
 }
 
 export function disableYesMode(): void {
-  yesOn = false;
+  (globalThis as Record<string, unknown>)[YES_KEY] = false;
 }
 
 export function isYesMode(): boolean {
-  return yesOn;
+  return (globalThis as Record<string, unknown>)[YES_KEY] === true;
 }
 
 function envYes(): boolean {
@@ -77,9 +80,9 @@ export function unpatchCtxUi(ctx: { ui: Record<string, unknown> }): void {
 export default function yes(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     if (pi.getFlag?.("yes") === true || envYes()) {
-      yesOn = true;
+      enableYesMode();
     }
-    if (yesOn) {
+    if (isYesMode()) {
       // Patch the shared ui now, before any tool_call fires.
       patchCtxUiAllow(ctx as unknown as { ui: Record<string, unknown> });
       try {
@@ -90,7 +93,7 @@ export default function yes(pi: ExtensionAPI): void {
 
   pi.on("tool_call", (_event, ctx) => {
     // Backup: re-assert the patch in case the ui object was rebound mid-session.
-    if (!yesOn) return;
+    if (!isYesMode()) return;
     patchCtxUiAllow(ctx as unknown as { ui: Record<string, unknown> });
   });
 
@@ -108,16 +111,16 @@ export default function yes(pi: ExtensionAPI): void {
       };
 
       if (sub === "status") {
-        const text = yesOn ? "✅ YES: ON  (prompts auto-approved)" : "🛡  YES: OFF (prompts active)";
+        const text = isYesMode() ? "✅ YES: ON  (prompts auto-approved)" : "🛡  YES: OFF (prompts active)";
         console.log(text);
-        notify(text, yesOn ? "warning" : "info");
+        notify(text, isYesMode() ? "warning" : "info");
         return;
       }
 
       let target: boolean;
       if (sub === "on")                        target = true;
       else if (sub === "off")                  target = false;
-      else if (sub === "" || sub === "toggle") target = !yesOn;
+      else if (sub === "" || sub === "toggle") target = !isYesMode();
       else {
         const msg = `yes: unknown subcommand "${sub}". Try /yes, /yes on, /yes off, /yes status.`;
         console.log(msg);
@@ -125,13 +128,14 @@ export default function yes(pi: ExtensionAPI): void {
         return;
       }
 
-      yesOn = target;
+      if (target) enableYesMode();
+      else disableYesMode();
       const uiCtx = ctx as unknown as { ui: Record<string, unknown> };
       if (target) patchCtxUiAllow(uiCtx);
       else unpatchCtxUi(uiCtx);
-      const msg = yesOn ? "✅ YES: ON  (prompts auto-approved)" : "🛡  YES: OFF (prompts active)";
+      const msg = target ? "✅ YES: ON  (prompts auto-approved)" : "🛡  YES: OFF (prompts active)";
       console.log(msg);
-      notify(msg, yesOn ? "warning" : "success");
+      notify(msg, target ? "warning" : "success");
     },
   });
 }

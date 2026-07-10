@@ -21,6 +21,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { readPiYuConfigFile } from "../lib/config.ts";
+import { isYesMode } from "./yes.ts";
 
 // Event names emitted by @aliou/pi-guardrails (see src/shared/events.ts).
 const GUARDRAILS_RISK_DETECTED_EVENT = "guardrails:risk:detected";
@@ -111,6 +112,9 @@ export default function supplementalNotificationsExtension(pi: ExtensionAPI) {
   // Guardrails: dangerous action detected (pre-prompt risk).
   pi.events.on(GUARDRAILS_RISK_DETECTED_EVENT, (event: GuardrailsRiskDetectedEvent) => {
     if (!cfg.dangerousCommand) return;
+    // Only notify in YOLO/yes mode: there the prompt is auto-approved, so the
+    // notification replaces it. Out of YOLO the interactive prompt is enough.
+    if (!isYesMode()) return;
     const target = describeAction(event?.risk?.action);
     const reason = event?.risk?.reason || "Dangerous action";
     const body = target ? `${reason}: ${target}` : reason;
