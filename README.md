@@ -1,11 +1,11 @@
-# pi-extensions
+# pi-yuri-extensions
 
 Your personal **pi package hub**.
 
-- Main extension name: **pi-extensions**
+- Main extension name: **pi-yuri-extensions**
 - All bundled extensions are **toggleable**
 - All toggles are **OFF by default**
-- Enable/disable modules in config: `.pi/extensions/pi-extensions.json` (project) or `~/.pi/agent/extensions/pi-extensions.json` (global)
+- Enable/disable modules in config: `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global)
 
 ## Install
 
@@ -18,13 +18,13 @@ pi install .
 
 ## How toggles work
 
-Only `extensions/pi-extensions.ts` is auto-loaded by pi.
+Only `extensions/pi-yuri-extensions.ts` is auto-loaded by pi.
 
-On `session_start`, `pi-extensions` reads config from:
+On `session_start`, `pi-yuri-extensions` reads config from:
 
-- project: `.pi/extensions/pi-extensions.json`
-- global: `~/.pi/agent/extensions/pi-extensions.json`
-- legacy fallback: `.pi/pi-extensions.json`
+- project: `.pi/extensions/pi-yuri-extensions.json`
+- global: `~/.pi/agent/extensions/pi-yuri-extensions.json`
+- legacy fallback: `.pi/pi-yuri-extensions.json`
 
 Project config takes precedence over global config when both exist.
 
@@ -46,7 +46,7 @@ Any omitted key defaults to `false`.
 
 ## Notification backend config (`yu-notify`)
 
-`yu-notify` supports configurable desktop notification transport via `.pi/extensions/pi-extensions.json` (project) or `~/.pi/agent/extensions/pi-extensions.json` (global):
+`yu-notify` supports configurable desktop notification transport via `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global):
 
 ```json
 {
@@ -103,12 +103,12 @@ Notes:
 Use:
 
 ```bash
-/pi-extensions
+/pi-yuri-extensions
 ```
 
 It prints current toggle status and config path.
 
-Enable the `what` module in `.pi/extensions/pi-extensions.json` (or `~/.pi/agent/extensions/pi-extensions.json` globally), then use:
+Enable the `what` module in `.pi/extensions/pi-yuri-extensions.json` (or `~/.pi/agent/extensions/pi-yuri-extensions.json` globally), then use:
 
 ```bash
 /what
@@ -156,7 +156,7 @@ Detection uses `ctx.isIdle()` (equivalent to the TUI "Working..." indicator) by 
 
 ### Config
 
-Add an `idle-watch` block to `.pi/extensions/pi-extensions.json` (project) or `~/.pi/agent/extensions/pi-extensions.json` (global):
+Add an `idle-watch` block to `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global):
 
 ```json
 {

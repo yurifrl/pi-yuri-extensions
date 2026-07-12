@@ -103,7 +103,7 @@ async function loadEnabled(pi: ExtensionAPI, cwd: string): Promise<{ loaded: str
       }
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error(`[pi-extensions] failed to load module '${name}':`, error);
+      console.error(`[pi-yuri-extensions] failed to load module '${name}':`, error);
     }
   }
 
@@ -124,13 +124,13 @@ export default function piYu(pi: ExtensionAPI) {
     default: false,
   });
   pi.registerFlag?.("quiet", {
-    description: "Suppress non-error pi-extensions / pi-gastown notifications (info/success toasts)",
+    description: "Suppress non-error pi-yuri-extensions / pi-gastown notifications (info/success toasts)",
     type: "boolean",
     default: false,
   });
   let initialized = false;
   let loadedModules: string[] = [];
-  let configPath = path.join(process.cwd(), ".pi", "extensions", "pi-extensions.json");
+  let configPath = path.join(process.cwd(), ".pi", "extensions", "pi-yuri-extensions.json");
 
   pi.on("session_start", async (_event, ctx) => {
     if (initialized) return;
@@ -139,7 +139,7 @@ export default function piYu(pi: ExtensionAPI) {
     // --quiet: monkey-patch the shared uiContext so EVERY extension's
     // ctx.ui.notify(...) becomes a no-op (errors still surface). All
     // extensions read ctx.ui from the same runner.uiContext object, so
-    // patching once silences pi-extensions, pi-gastown, idle-watch,
+    // patching once silences pi-yuri-extensions, pi-gastown, idle-watch,
     // anything else loaded.
     if (pi.getFlag?.("quiet") === true) {
       const orig = ctx.ui.notify.bind(ctx.ui);
@@ -153,16 +153,16 @@ export default function piYu(pi: ExtensionAPI) {
     configPath = loaded.configPath;
 
     const msg = loadedModules.length > 0
-      ? `pi-extensions loaded: ${loadedModules.join(", ")}`
-      : "pi-extensions loaded with no active modules (all off by default)";
+      ? `pi-yuri-extensions loaded: ${loadedModules.join(", ")}`
+      : "pi-yuri-extensions loaded with no active modules (all off by default)";
 
     if (pi.getFlag?.("quiet") !== true) {
       ctx.ui.notify(msg, loadedModules.length > 0 ? "success" : "info");
     }
   });
 
-  pi.registerCommand("pi-extensions", {
-    description: "Show pi-extensions module toggle status and config path",
+  pi.registerCommand("pi-yuri-extensions", {
+    description: "Show pi-yuri-extensions module toggle status and config path",
     handler: async (_args, ctx) => {
       const { config } = await readConfig(typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd);
       const rows = Object.keys(MODULE_LOADERS)
@@ -171,11 +171,11 @@ export default function piYu(pi: ExtensionAPI) {
         .join("\n");
 
       const loaded = loadedModules.length ? loadedModules.join(", ") : "(none)";
-      const text = `pi-extensions\n\nConfig: ${configPath}\n\nLoaded this session: ${loaded}\n\nToggles:\n${rows}`;
+      const text = `pi-yuri-extensions\n\nConfig: ${configPath}\n\nLoaded this session: ${loaded}\n\nToggles:\n${rows}`;
 
       // eslint-disable-next-line no-console
       console.log(text);
-      ctx.ui.notify(`pi-extensions status printed to terminal (${configPath})`, "info");
+      ctx.ui.notify(`pi-yuri-extensions status printed to terminal (${configPath})`, "info");
     },
   });
 }

@@ -17,7 +17,7 @@ Extensions from this project must be enabled globally in `~/.pi/agent/settings.j
 
 ```json
 {
-  "source": "./extensions/pi-extensions",
+  "source": "./extensions/pi-yuri-extensions",
   "extensions": [
     "!extensions/modules/*",
     "+extensions/modules/agents-mcp-loader.ts",
@@ -26,5 +26,5 @@ Extensions from this project must be enabled globally in `~/.pi/agent/settings.j
 }
 ```
 
-The `!extensions/modules/*` line disables all modules by default, then individual `+` lines opt in specific ones. The main entry point (`extensions/pi-extensions.ts`) and its always-on commands (`/update`, `/pi-extensions`) are loaded automatically.
+The `!extensions/modules/*` line disables all modules by default, then individual `+` lines opt in specific ones. The main entry point (`extensions/pi-yuri-extensions.ts`) and its always-on commands (`/update`, `/pi-yuri-extensions`) are loaded automatically.
 

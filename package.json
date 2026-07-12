@@ -1,16 +1,16 @@
 {
-  "name": "pi-extensions",
+  "name": "pi-yuri-extensions",
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Pi package: pi-extensions toggleable extension hub + zellij notifications",
-  "keywords": ["pi-package", "pi-extensions", "zellij", "notifications", "extensions"],
+  "description": "Pi package: pi-yuri-extensions toggleable extension hub + zellij notifications",
+  "keywords": ["pi-package", "pi-yuri-extensions", "zellij", "notifications", "extensions"],
   "dependencies": {
     "yaml": "^2.8.0"
   },
   "pi": {
     "extensions": [
-      "./extensions/pi-extensions.ts",
+      "./extensions/pi-yuri-extensions.ts",
       "./extensions/yolo.ts"
     ],
     "skills": ["./.pi/skills"]
