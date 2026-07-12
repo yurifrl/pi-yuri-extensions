@@ -25,7 +25,7 @@
  *     `pi.sendUserMessage(..., { deliverAs: "followUp" })` or `ui.notify`.
  *
  * Toggle config (hook only — extension itself stays loaded):
- *   - Global: ~/.pi/agent/extensions/pi-extensions.json  → "pi-beads".hook = true|false
+ *   - Global: ~/.pi/agent/extensions/pi-yuri-extensions.json  → "pi-beads".hook = true|false
  *   - Loader gate (separate): "extensions"."pi-beads" controls whether the
  *     module is loaded at all by the pi-extensions hub. Don't toggle that
  *     from /bd — turning it off would also kill the /bd command.
@@ -47,10 +47,11 @@ import {
   truncateToWidth,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
+import { PI_YU_CONFIG_FILENAME } from "../config.ts";
 
 const EXEC_TIMEOUT_MS = 8_000;
 const BD_RUN_TIMEOUT_MS = 30_000;
-const GLOBAL_TOGGLE_PATH = join(homedir(), ".pi", "agent", "extensions", "pi-extensions.json");
+const GLOBAL_TOGGLE_PATH = join(homedir(), ".pi", "agent", "extensions", PI_YU_CONFIG_FILENAME);
 
 // In-memory override so `/bd hook off` takes effect immediately. Initialised
 // from the on-disk config so a fresh session inherits the saved choice.
@@ -480,7 +481,7 @@ function parseInlineCreate(rest: string[]): { title: string; flags: string[] } {
 //     (work=true).
 //
 // Two modes for the dispatch (work) flow
-// (config: ~/.pi/agent/extensions/pi-extensions.json → "pi-beads".dispatchMode):
+// (config: ~/.pi/agent/extensions/pi-yuri-extensions.json → "pi-beads".dispatchMode):
 //   - "immediate" (default): inject the instruction right away.
 //   - "boundary": queue the request and inject at the next agent_end (turn
 //     boundary), so dispatch never interrupts an in-flight turn.
