@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { syncBedrockRuntimeApiKey } from "./lib/bedrock-auth.ts";
 import { type PiYuConfig, readPiYuConfig } from "./lib/config.ts";
 
 type State = "pending" | "focus" | "running" | "ok" | "error";
@@ -33,8 +34,7 @@ const STATE_COLOR: Record<State, "dim" | "accent" | "warning" | "success" | "err
 // pi's Bedrock provider reads AWS_BEARER_TOKEN_BEDROCK per request. Setting it
 // from inside the extension (at session_start, and via `/aws bedrock`) means
 // pi uses a dedicated, Bedrock-scoped API key for LLM calls no matter how pi
-// was launched — while AWS_PROFILE is left untouched, so every other AWS call
-// in the process keeps using the ambient SSO credentials.
+// was launched. AWS_PROFILE is left untouched.
 //
 // The tokens live in a 1Password item with one section per environment
 // (production, staging, ...), each holding a *_BEARER_TOKEN_BEDROCK field. A
@@ -45,7 +45,6 @@ const BEDROCK_TOKEN_VAR = "AWS_BEARER_TOKEN_BEDROCK";
 const BEDROCK_TOKEN_LEAF = "BEARER_TOKEN_BEDROCK"; // suffix shared by all *_BEARER_TOKEN_BEDROCK labels
 const BEDROCK_DEFAULT_FIELD = "DEFAULT"; // item field whose value names the default section/profile
 const BEDROCK_FALLBACK_PROFILE = "production"; // used only if the DEFAULT field is absent
-const BEDROCK_SSO = "sso"; // pseudo-profile: disable the token, fall back to ambient SSO
 // Hardcoded /tmp (not os.tmpdir(), which is /var/folders/... on macOS) to match
 // the user's existing /tmp/1pass-load-envs convention.
 const BEDROCK_CACHE = "/tmp/1pass-load-envs/bedrock.json";
@@ -60,16 +59,22 @@ type BedrockCfg = { item: string; vault: string; account: string };
 type BedrockCache = { profile: string; token: string };
 
 export default function (pi: ExtensionAPI) {
-  // On load (session_start), give pi's Bedrock provider its dedicated API key
-  // without an external wrapper. Cache-first, so startup is not blocked.
-  bootstrapBedrockToken();
+  const bedrockReady = bootstrapBedrockToken();
+
+  pi.on("session_start", async (_event, ctx) => {
+    await bedrockReady;
+    syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, bedrockToken);
+  });
 
   // Re-apply right before every provider request so the token is guaranteed
   // present even if a request fires before startup injection settles.
-  pi.on?.("before_provider_request", () => ensureTokenApplied());
+  pi.on("before_provider_request", (_event, ctx) => {
+    ensureTokenApplied();
+    syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, bedrockToken);
+  });
 
   pi.registerCommand("aws", {
-    description: "aws: /aws login [profiles...] | /aws bedrock [prd|stg|sso]",
+    description: "aws: /aws login [profiles...] | /aws bedrock [profile]",
     getArgumentCompletions: () => [
       {
         value: "login",
@@ -79,7 +84,7 @@ export default function (pi: ExtensionAPI) {
       {
         value: "bedrock",
         label: "bedrock",
-        description: "Switch the Bedrock API key (prd/stg/sso) pi uses for LLM calls; no arg follows the DEFAULT field",
+        description: "Switch the Bedrock API key profile; no arg follows the DEFAULT field",
       },
     ],
     handler: async (args, ctx) => {
@@ -92,7 +97,7 @@ export default function (pi: ExtensionAPI) {
       const sub = (parts[0] ?? "").toLowerCase();
 
       if (!sub) {
-        ctx.ui.notify?.("aws: usage — /aws login [profile ...] | /aws bedrock [prd|stg|sso]", "info");
+        ctx.ui.notify?.("aws: usage — /aws login [profile ...] | /aws bedrock [profile]", "info");
         return;
       }
       if (sub === "bedrock") {
@@ -367,7 +372,7 @@ async function resolveToken(profile: string, cfg: BedrockCfg): Promise<BedrockCa
 function readCache(): BedrockCache | null {
   try {
     const c = JSON.parse(readFileSync(BEDROCK_CACHE, "utf8")) as BedrockCache;
-    if (c && typeof c.profile === "string" && typeof c.token === "string") return c;
+    if (c && typeof c.profile === "string" && typeof c.token === "string" && c.token.length > 0) return c;
   } catch {
     // missing/corrupt cache -> treat as cold
   }
@@ -385,44 +390,40 @@ function writeCache(c: BedrockCache): void {
 
 // applyToken sets or clears AWS_BEARER_TOKEN_BEDROCK in this process so pi's
 // Bedrock provider picks it up. Never touches AWS_PROFILE.
-function applyToken(token: string | null): void {
+function applyToken(token: string | undefined): void {
   if (token) process.env[BEDROCK_TOKEN_VAR] = token;
   else delete process.env[BEDROCK_TOKEN_VAR];
 }
 
-// In-memory token: undefined = not loaded, null = disabled (sso/none), string = active.
-let bedrockToken: string | null | undefined;
+let bedrockToken: string | undefined;
 
 // ensureTokenApplied makes process.env reflect the current token. On first call
 // it loads from the cache (sync). Cheap and idempotent — safe to call before
 // every provider request, which defeats any extension-load race (pi reads
 // AWS_BEARER_TOKEN_BEDROCK per request, so this guarantees it is set in time).
 function ensureTokenApplied(): void {
-  if (bedrockToken === undefined) {
-    const c = readCache();
-    bedrockToken = c ? c.token || null : null;
-  }
+  if (bedrockToken === undefined) bedrockToken = readCache()?.token;
   applyToken(bedrockToken);
 }
 
-// bootstrapBedrockToken runs at extension load: apply the cached token instantly
-// (sso/empty => leave unset), or on a cold cache fetch the DEFAULT profile in
-// the background without blocking startup.
-function bootstrapBedrockToken(): void {
+// bootstrapBedrockToken runs at extension load: apply the cached token instantly,
+// or fetch the DEFAULT profile from 1Password on a cold cache.
+function bootstrapBedrockToken(): Promise<void> {
   const cached = readCache();
   if (cached) {
-    bedrockToken = cached.token || null;
+    bedrockToken = cached.token;
     applyToken(bedrockToken);
-    return;
+    return Promise.resolve();
   }
-  void resolveToken("", bedrockCfg({}))
+  return resolveToken("", bedrockCfg({}))
     .then((c) => {
       bedrockToken = c.token;
       applyToken(bedrockToken);
       writeCache(c);
     })
     .catch(() => {
-      // no token available -> pi falls back to the ambient credential chain
+      bedrockToken = undefined;
+      applyToken(undefined);
     });
 }
 
@@ -430,17 +431,11 @@ function bootstrapBedrockToken(): void {
 // update this process's env + the cache, and report the active profile.
 async function runBedrockSwitch(args: string[], ctx: any, config: PiYuConfig): Promise<void> {
   const profile = (args[0] ?? "").trim();
-  if (profile.toLowerCase() === BEDROCK_SSO) {
-    bedrockToken = null;
-    applyToken(null);
-    writeCache({ profile: BEDROCK_SSO, token: "" });
-    ctx.ui.notify?.("aws bedrock: token disabled — Bedrock uses ambient SSO", "info");
-    return;
-  }
   try {
     const c = await resolveToken(profile, bedrockCfg(config));
     bedrockToken = c.token;
     applyToken(c.token);
+    syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, c.token);
     writeCache(c);
     ctx.ui.notify?.(`aws bedrock: using ${c.profile} token (AWS_BEARER_TOKEN_BEDROCK set)`, "success");
   } catch (e) {
