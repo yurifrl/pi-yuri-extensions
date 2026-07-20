@@ -2,13 +2,15 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 
-export const PI_YU_CONFIG_FILENAME = "pi-extensions.json";
+export const PI_YU_CONFIG_FILENAME = "pi-yuri-extensions.json";
 
 export type PiYuConfig = {
 	extensions?: Record<string, boolean>;
 	crossAgent?: {
 		allowlist?: string[];
 		verbose?: boolean;
+		agents?: { enabled?: boolean };
+		"claude-code"?: { enabled?: boolean };
 		recursiveDepth?: {
 			skills?: number;
 			agents?: number;

@@ -215,7 +215,7 @@ function scanAgents(dir: string, maxDepth = 0): Discovered[] {
 }
 
 function scanAgentsFiles(baseDir: string): string[] {
-	const candidates = [join(baseDir, "AGENTS.md"), join(baseDir, ".agents", "AGENTS.md")];
+	const candidates = [join(baseDir, "AGENTS.md"), join(baseDir, "CLAUDE.md"), join(baseDir, ".agents", "AGENTS.md")];
 	return candidates.filter((filePath) => existsSync(filePath));
 }
 
@@ -255,12 +255,17 @@ function collectPiCoreLoadedSkillNames(cwd: string, home: string): Set<string> {
 	return names;
 }
 
-function defaultSources(cwd: string, home: string): SourceSpec[] {
-	return [
-		{ key: "local-agents", label: ".agents", baseDir: join(cwd, ".agents"), scanCommands: true, scanSkills: true, scanAgents: true },
-		{ key: "local-claude", label: ".claude", baseDir: join(cwd, ".claude"), scanCommands: true, scanSkills: true, scanAgents: true },
-		{ key: "global-agents", label: "~/.agents", baseDir: join(home, ".agents"), scanCommands: true, scanSkills: true, scanAgents: true },
-	];
+function defaultSources(cwd: string, home: string, agentsEnabled: boolean, claudeEnabled: boolean): SourceSpec[] {
+	const specs: SourceSpec[] = [];
+	if (agentsEnabled) {
+		specs.push({ key: "local-agents", label: ".agents", baseDir: join(cwd, ".agents"), scanCommands: true, scanSkills: true, scanAgents: true });
+		specs.push({ key: "global-agents", label: "~/.agents", baseDir: join(home, ".agents"), scanCommands: true, scanSkills: true, scanAgents: true });
+	}
+	if (claudeEnabled) {
+		specs.push({ key: "local-claude", label: ".claude", baseDir: join(cwd, ".claude"), scanCommands: true, scanSkills: true, scanAgents: true });
+		specs.push({ key: "global-claude", label: "~/.claude", baseDir: join(home, ".claude"), scanCommands: true, scanSkills: true, scanAgents: true });
+	}
+	return specs;
 }
 
 function extraSourcesFromAllowlist(cwd: string, home: string, allowlist: string[]): SourceSpec[] {
@@ -293,6 +298,7 @@ function discoverSourceGroup(spec: SourceSpec, depths: { commands: number; skill
 	const agentsFiles = scanAgentsFiles(spec.baseDir);
 
 	for (const filePath of agentsFiles) {
+		if (loadedAgentsFiles.includes(filePath)) continue;
 		try {
 			loadedAgentsFiles.push(filePath);
 			loadedAgentsContent.push(readFileSync(filePath, "utf-8"));
@@ -305,14 +311,16 @@ function discoverSourceGroup(spec: SourceSpec, depths: { commands: number; skill
 	return { source: spec.label, commands, skills, agents, agentsFiles };
 }
 
-function renderNotification(groups: SourceGroup[], home: string): string {
+function renderNotification(groups: SourceGroup[], home: string, verbose: boolean): string {
 	const contextFiles = groups.flatMap((g) => g.agentsFiles);
 	const lines: string[] = [];
 
 	if (contextFiles.length) {
 		lines.push(yellow("[Context]"));
-		for (const filePath of contextFiles) {
-			lines.push(`  ${dim(filePath.replace(home, "~"))}`);
+		if (verbose) {
+			for (const filePath of contextFiles) lines.push(`  ${dim(filePath.replace(home, "~"))}`);
+		} else {
+			lines.push(`  ${dim(`${contextFiles.length} file${contextFiles.length > 1 ? "s" : ""}`)}`);
 		}
 		lines.push("");
 	}
@@ -327,6 +335,7 @@ function renderNotification(groups: SourceGroup[], home: string): string {
 		if (counts.length === 0) continue;
 		lines.push(`  ${dim(g.source)}${dim(" — ")}${counts.join(dim(", "))}`);
 
+		if (!verbose) continue;
 		if (g.commands.length) {
 			lines.push(`    ${dim("commands:")}`);
 			for (const cmd of g.commands) lines.push(`      ${yellow("/")}${cyan(cmd.name)}`);
@@ -353,6 +362,8 @@ export default async function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
 	const { config } = await readPiYuConfig(cwd);
 	const allowlist = config.crossAgent?.allowlist || [];
+	const agentsEnabled = config.crossAgent?.agents?.enabled !== false;
+	const claudeEnabled = config.crossAgent?.["claude-code"]?.enabled !== false;
 	const configuredCommandDepth = config.crossAgent?.recursiveDepth?.commands;
 	const configuredSkillDepth = config.crossAgent?.recursiveDepth?.skills;
 	const configuredAgentDepth = config.crossAgent?.recursiveDepth?.agents;
@@ -366,7 +377,7 @@ export default async function (pi: ExtensionAPI) {
 	const loadedAgentsContent: string[] = [];
 	const loadedAgentsFiles: string[] = [];
 	const groups: SourceGroup[] = [];
-	const specs = [...defaultSources(cwd, home), ...extraSourcesFromAllowlist(cwd, home, allowlist)];
+	const specs = [...defaultSources(cwd, home, agentsEnabled, claudeEnabled), ...extraSourcesFromAllowlist(cwd, home, allowlist)];
 
 	for (const spec of specs) {
 		const group = discoverSourceGroup(spec, depths, excludedSkills, seenCrossAgentSkills, loadedAgentsFiles, loadedAgentsContent);
@@ -405,10 +416,10 @@ export default async function (pi: ExtensionAPI) {
 		const configVerbose = config.crossAgent?.verbose === true;
 		const envVerbose = ["1", "true", "yes", "on"].includes((process.env.PI_CROSS_AGENT_VERBOSE || "").toLowerCase());
 		const flagVerbose = pi.getFlag("cross-agent-verbose") === true;
-		const shouldPrintStartup = flagVerbose || envVerbose || configVerbose;
-		if (shouldPrintStartup && ctx.hasUI) {
+		const verbose = flagVerbose || envVerbose || configVerbose;
+		if (ctx.hasUI) {
 			setTimeout(() => {
-				ctx.ui.notify(renderNotification(groups, home), "info");
+				ctx.ui.notify(renderNotification(groups, home, verbose), "info");
 			}, 100);
 		}
 	});
