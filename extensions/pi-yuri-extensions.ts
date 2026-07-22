@@ -99,11 +99,6 @@ export default function piYu(pi: ExtensionAPI) {
     type: "boolean",
     default: false,
   });
-  pi.registerFlag?.("cross-agent-verbose", {
-    description: "Print cross-agent discovery details on startup",
-    type: "boolean",
-    default: false,
-  });
   pi.registerFlag?.("quiet", {
     description: "Suppress non-error pi-yuri-extensions / pi-gastown notifications (info/success toasts)",
     type: "boolean",
