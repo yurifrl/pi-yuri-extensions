@@ -14,16 +14,12 @@ type ToggleConfig = {
 
 const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   yes: () => import("./modules/yes.ts"),
-  "agents-mcp-loader": () => import("./modules/agents-mcp-loader.ts"),
   "yu-notify": () => import("./modules/yu-notify.ts"),
   "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
-  "cross-agent": () => import("./modules/cross-agent.ts"),
   "custom-footer": () => import("./modules/custom-footer.ts"),
   checkpoint: () => import("./modules/checkpoint.ts"),
   "supplemental-notifications": () => import("./modules/supplemental-notifications.ts"),
-  update: () => import("./modules/update.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
-  respond: () => import("./modules/respond.ts"),
   draft: () => import("./modules/draft.ts"),
   "greetings": () => import("./modules/greetings.ts"),
   "session-id": () => import("./modules/session-id.ts"),
@@ -33,8 +29,6 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   helpy: () => import("./modules/helpy.ts"),
   "pi-beads": () => import("./modules/pi-beads.ts"),
   "git": () => import("./modules/git.ts"),
-  thinking: () => import("./modules/thinking.ts"),
-  timeout: () => import("./modules/timeout.ts"),
   e: () => import("./modules/e.ts"),
 };
 

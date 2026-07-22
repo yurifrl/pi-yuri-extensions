@@ -10,8 +10,7 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/pi-yuri-extensions.ts",
-      "./extensions/yolo.ts"
+      "./extensions/pi-yuri-extensions.ts"
     ],
     "skills": ["./.pi/skills"]
   }
