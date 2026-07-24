@@ -26,6 +26,7 @@ import { isYesMode } from "./yes.ts";
 // Event names emitted by @aliou/pi-guardrails (see src/shared/events.ts).
 const GUARDRAILS_RISK_DETECTED_EVENT = "guardrails:risk:detected";
 const GUARDRAILS_ACTION_BLOCKED_EVENT = "guardrails:action:blocked";
+const GUARDRAILS_ACTION_PROMPTED_EVENT = "guardrails:action:prompted";
 
 type GuardrailsAction =
   | { kind: "file"; path: string; origin?: string }
@@ -42,6 +43,16 @@ interface GuardrailsRiskDetectedEvent {
     reason: string;
     metadata?: unknown;
   };
+  context?: { toolName?: string; input?: Record<string, unknown> };
+}
+
+interface GuardrailsActionPromptedEvent {
+  source: "guardrails";
+  feature: "policies" | "permissionGate" | "pathAccess";
+  timestamp: string;
+  action: GuardrailsAction;
+  reason: string;
+  prompt: { kind: "confirmation" | "permission"; metadata?: unknown };
   context?: { toolName?: string; input?: Record<string, unknown> };
 }
 
@@ -69,6 +80,7 @@ function trim(text: string, max = 200): string {
 
 type NotifConfig = {
   dangerousCommand?: boolean;
+  promptedInput?: boolean;
   blockedCommand?: boolean;
   question?: boolean;
   agentError?: boolean;
@@ -77,6 +89,7 @@ type NotifConfig = {
 
 const DEFAULTS: Required<NotifConfig> = {
   dangerousCommand: true,
+  promptedInput: true,
   blockedCommand: true,
   question: true,
   agentError: true,
@@ -119,6 +132,17 @@ export default function supplementalNotificationsExtension(pi: ExtensionAPI) {
     const reason = event?.risk?.reason || "Dangerous action";
     const body = target ? `${reason}: ${target}` : reason;
     notify("⚠️ Dangerous Command", trim(body));
+  });
+
+  // Guardrails: system is asking for your input (permission / confirmation prompt).
+  pi.events.on(GUARDRAILS_ACTION_PROMPTED_EVENT, (event: GuardrailsActionPromptedEvent) => {
+    if (!cfg.promptedInput) return;
+    // In YOLO/yes mode the prompt is auto-answered, so there is nothing to ask.
+    if (isYesMode()) return;
+    const target = describeAction(event?.action);
+    const reason = event?.reason || "Input needed";
+    const body = target ? `${reason}: ${target}` : reason;
+    notify("✋ Input Needed", trim(body));
   });
 
   // Guardrails: action blocked (policy / permission / user / non-interactive).
