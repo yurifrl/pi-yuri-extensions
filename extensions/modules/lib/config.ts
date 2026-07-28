@@ -36,6 +36,13 @@ export type PiYuConfig = {
 		warnMB?: number;
 		criticalMB?: number;
 	};
+	customFooter?: {
+		ctxCap?: number | null;
+		warnCost?: number;
+		critCost?: number;
+		cacheTtlSec?: number;
+		components?: Record<string, boolean>;
+	};
 	"idle-watch"?: {
 		enabled?: boolean;
 		tickSeconds?: number;
