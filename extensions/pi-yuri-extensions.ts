@@ -16,7 +16,6 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   yes: () => import("./modules/yes.ts"),
   "yu-notify": () => import("./modules/yu-notify.ts"),
   "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
-  "custom-footer": () => import("./modules/custom-footer.ts"),
   checkpoint: () => import("./modules/checkpoint.ts"),
   "supplemental-notifications": () => import("./modules/supplemental-notifications.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
