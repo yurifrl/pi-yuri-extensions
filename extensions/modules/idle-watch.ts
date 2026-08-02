@@ -26,6 +26,10 @@
  *   working        string    default "10m" — threshold for stuck alerts
  *                            (time since last turn/tool event while working)
  *   idle           string    default "15m" — threshold for idle alerts
+ *   recover        boolean   default false — auto abort+resend "continue" on stall
+ *   recoverAfter   string    default "3m" — silence before auto-recover fires
+ *   maxNudges      number    default 3 — max auto-recover nudges per working span
+ *   showTimer      boolean   default true — live "⏳ <elapsed>" footer while working
  *   templates      object    per-state title/subtitle/body template overrides
  *
  * Template tokens:
@@ -44,6 +48,7 @@
  *
  * Commands:
  *   /idle           status + effective config
+ *   /nudge          interrupt (if working) + send "continue" — unstick a stalled run
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -158,6 +163,14 @@ interface Config {
 	 */
 	working: string[];
 	idle: string[];
+	/** Auto-recover a stalled working run: abort + resend "continue". Opt-in. */
+	recover: boolean;
+	/** Silence (since last turn/tool event) before an auto-recover fires, e.g. "3m". */
+	recoverAfter: string;
+	/** Max auto-recover nudges per working span. */
+	maxNudges: number;
+	/** Show a live "⏳ <elapsed>" footer status line while working. */
+	showTimer: boolean;
 	templates: { working: Template; idle: Template };
 }
 
@@ -186,6 +199,10 @@ const DEFAULTS: Config = {
 	graceSeconds: 300,
 	working: ["10m"],
 	idle: ["15m"],
+	recover: false,
+	recoverAfter: "3m",
+	maxNudges: 3,
+	showTimer: true,
 	templates: DEFAULT_TEMPLATES,
 };
 
@@ -285,6 +302,10 @@ function mergeConfig(raw: Partial<Config>): Config {
 		graceSeconds: pickNum(raw.graceSeconds, DEFAULTS.graceSeconds, 0),
 		working,
 		idle,
+		recover: typeof raw.recover === "boolean" ? raw.recover : DEFAULTS.recover,
+		recoverAfter: pickStr(raw.recoverAfter, DEFAULTS.recoverAfter),
+		maxNudges: pickNum(raw.maxNudges, DEFAULTS.maxNudges, 0),
+		showTimer: typeof raw.showTimer === "boolean" ? raw.showTimer : DEFAULTS.showTimer,
 		templates: {
 			working: pickTmpl(t.working, DEFAULT_TEMPLATES.working),
 			idle: pickTmpl(t.idle, DEFAULT_TEMPLATES.idle),
@@ -405,6 +426,12 @@ function render(tmpl: string, vars: Record<string, string>): string {
 // ─── module-scoped state ────────────────────────────────────────────────
 
 let timer: ReturnType<typeof setInterval> | null = null;
+let displayTimer: ReturnType<typeof setInterval> | null = null;
+// Start of the current working span for the live footer timer. Set on the
+// first tick that observes work, cleared when fully idle. Independent of
+// `enteredAt` (which drives notification thresholds) so the display refreshes
+// every second regardless of the slower detection `tickSeconds`.
+let workingSince: number | null = null;
 let config: Config = DEFAULTS;
 let cwdRef = process.cwd();
 let ctxRef: unknown = null;
@@ -431,6 +458,10 @@ let workCount = 0;
 const inFlightTools = new Set<string>(); // toolCallId
 let turnsInFlight = 0;
 
+// Auto-recover nudge tracking (per working span; reset on transition/session).
+let recoverCount = 0;
+let lastNudgeAt = 0;
+
 function bumpWork(delta: number): void {
 	workCount = Math.max(0, workCount + delta);
 }
@@ -450,6 +481,28 @@ function pollIsIdle(): boolean | null {
 		return fn.call(ctxRef);
 	} catch {
 		return null;
+	}
+}
+
+// Live footer timer. Runs on its own 1s interval so the working elapsed shows
+// immediately and counts smoothly, independent of the slower detection tick.
+// `workingSince` spans the whole working run (set on first observed work,
+// cleared only when fully idle) so it doesn't reset between turns/tools.
+function refreshTimer(): void {
+	if (!config.showTimer) return;
+	const ui = (ctxRef as { ui?: { setStatus?: (id: string, text: string) => void } } | null)?.ui;
+	if (typeof ui?.setStatus !== "function") return;
+
+	// Cheap signals first (workCount, streaming); crewActive() only when
+	// otherwise idle, so active runs never touch the filesystem here.
+	const working = workCount > 0 || pollIsIdle() === false || crewActive();
+
+	if (working) {
+		if (workingSince === null) workingSince = Date.now();
+		ui.setStatus("nudge-timer", `⏳ ${fmtDuration(Date.now() - workingSince)}`);
+	} else if (workingSince !== null) {
+		workingSince = null;
+		ui.setStatus("nudge-timer", "");
 	}
 }
 
@@ -474,6 +527,8 @@ async function tick(): Promise<void> {
 			fired.idle = 0;
 			lastFiredAt.working = null;
 			lastFiredAt.idle = null;
+			recoverCount = 0;
+			lastNudgeAt = 0;
 			// AUTO-DISMISS DISABLED (investigating vanishing notifications)
 			// const toDismiss = activeNotif[prev];
 			// if (toDismiss) {
@@ -481,6 +536,10 @@ async function tick(): Promise<void> {
 			// 	await cmuxDismiss(toDismiss).catch(() => {});
 			// }
 		}
+
+	// Live working-elapsed timer runs on its own 1s interval (refreshTimer),
+	// decoupled from this detection tick so it appears immediately and updates
+	// every second even when tickSeconds is coarse.
 
 	// Grace: track state but don't fire.
 	const graceMs = Math.max(0, config.graceSeconds) * 1000;
@@ -491,6 +550,24 @@ async function tick(): Promise<void> {
 	const graceEndedAt = bootAt + graceMs;
 	if (graceMs > 0 && enteredAt < graceEndedAt) {
 		enteredAt = graceEndedAt;
+	}
+
+	// Auto-recover: abort + resend "continue" for a genuinely stalled working
+	// run. Same silence-since-activity anchor as notifications. Opt-in, capped,
+	// and skipped while a pi-crew run is legitimately working.
+	if (config.recover && state === "working" && !crewWorking && recoverCount < config.maxNudges) {
+		let afterMs = 0;
+		try {
+			afterMs = parseDuration(config.recoverAfter);
+		} catch {
+			afterMs = 0;
+		}
+		const stall = now - Math.max(enteredAt, lastActivityAt);
+		if (afterMs > 0 && stall >= afterMs && now - lastNudgeAt >= afterMs) {
+			nudge();
+			recoverCount += 1;
+			lastNudgeAt = now;
+		}
 	}
 
 	// Unified schedule: schedule[0] = initial threshold, schedule[i>0] = gap before fire i.
@@ -554,10 +631,28 @@ async function fire(s: PiState, elapsed: number, threshold: string): Promise<voi
 	}
 }
 
+// Interrupt the current turn (if working) and resend "continue" — the manual
+// /nudge action and the auto-recover action share this.
+function nudge(): void {
+	if (!piRef) return;
+	const ctx = ctxRef as { isIdle?: () => boolean; abort?: () => void } | null;
+	const idle = ctx?.isIdle?.() ?? true;
+	try {
+		if (!idle) ctx?.abort?.();
+		piRef.sendUserMessage("continue", idle ? undefined : { deliverAs: "followUp" });
+	} catch (err) {
+		console.warn("[idle-watch] nudge failed:", err);
+	}
+}
+
 function shutdown(): void {
 	if (timer) {
 		clearInterval(timer);
 		timer = null;
+	}
+	if (displayTimer) {
+		clearInterval(displayTimer);
+		displayTimer = null;
 	}
 	// AUTO-DISMISS DISABLED (investigating vanishing notifications)
 	// for (const s of ["working", "idle"] as const) {
@@ -638,7 +733,9 @@ function statusText(): string {
 		`schedule: working=[${config.working.join(",")}]  idle=[${config.idle.join(",")}]  tick=${config.tickSeconds}s  grace=${config.graceSeconds}s`,
 		`work: turns=${turnsInFlight} tools=${inFlightTools.size} total=${workCount}  ctx.isIdle=${pollIsIdle() === null ? "?" : pollIsIdle() ? "true" : "false"}  crew=${crewActive() ? "running" : "idle"}`,
 		`suppression: pause=${pauseStatusText(now)}`,
+		`recover: ${config.recover ? `on after ${config.recoverAfter} (${recoverCount}/${config.maxNudges} used)` : "off"}   timer: ${config.showTimer ? "on" : "off"}`,
 		`commands:`,
+		`  /nudge                interrupt (if working) + send 'continue'`,
 		`  /idle                 show this status`,
 		`  /idle pause           pause indefinitely — /idle resume to clear`,
 		`  /idle pause <dur>     pause for a duration (e.g. 10m)`,
@@ -672,6 +769,8 @@ export default function idleWatch(pi: ExtensionAPI): void {
 		turnsInFlight = 0;
 		inFlightTools.clear();
 		lastActivityAt = bootAt;
+		recoverCount = 0;
+		lastNudgeAt = 0;
 
 		config = await loadConfig(cwdRef);
 
@@ -694,6 +793,17 @@ export default function idleWatch(pi: ExtensionAPI): void {
 		try {
 			(timer as { unref?: () => void }).unref?.();
 		} catch {}
+
+		// Live footer timer on a fixed 1s cadence (independent of tickSeconds) so
+		// the working elapsed appears immediately and counts smoothly.
+		workingSince = null;
+		if (displayTimer) clearInterval(displayTimer);
+		if (config.showTimer) {
+			displayTimer = setInterval(() => refreshTimer(), 1000);
+			try {
+				(displayTimer as { unref?: () => void }).unref?.();
+			} catch {}
+		}
 	});
 
 	// Turn-level: main agent LLM streaming. Multiple turns per prompt are possible.
@@ -821,6 +931,21 @@ export default function idleWatch(pi: ExtensionAPI): void {
 
 				default:
 					notify(`idle-watch: unknown subcommand '${sub}'. Try /idle for help.`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand?.("nudge", {
+		description: "Interrupt if working, then send 'continue' (unstick a stalled run)",
+		handler: async (_args, ctx) => {
+			const c = ctx as unknown as { isIdle?: () => boolean; abort?: () => void };
+			const idle = c.isIdle?.() ?? true;
+			try {
+				if (!idle) c.abort?.();
+				pi.sendUserMessage("continue", idle ? undefined : { deliverAs: "followUp" });
+				ctx.ui.notify(idle ? "nudge: sent 'continue'" : "nudge: interrupted + queued 'continue'", "info");
+			} catch (err) {
+				ctx.ui.notify(`nudge failed: ${(err as Error).message}`, "error");
 			}
 		},
 	});
