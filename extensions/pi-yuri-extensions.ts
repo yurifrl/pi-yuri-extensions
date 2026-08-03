@@ -14,17 +14,13 @@ type ToggleConfig = {
 
 const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   yes: () => import("./modules/yes.ts"),
-  "yu-notify": () => import("./modules/yu-notify.ts"),
-  "tilldone-footer": () => import("./modules/tilldone-footer.ts"),
   checkpoint: () => import("./modules/checkpoint.ts"),
-  "supplemental-notifications": () => import("./modules/supplemental-notifications.ts"),
   "copy-slack": () => import("./modules/copy-slack.ts"),
   draft: () => import("./modules/draft.ts"),
   "greetings": () => import("./modules/greetings.ts"),
   "session-id": () => import("./modules/session-id.ts"),
   aws: () => import("./modules/aws.ts"),
   memwatch: () => import("./modules/memwatch.ts"),
-  "idle-watch": () => import("./modules/idle-watch.ts"),
   helpy: () => import("./modules/helpy.ts"),
   "pi-beads": () => import("./modules/pi-beads.ts"),
   "git": () => import("./modules/git.ts"),

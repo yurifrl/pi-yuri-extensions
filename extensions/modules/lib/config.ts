@@ -36,13 +36,6 @@ export type PiYuConfig = {
 		warnMB?: number;
 		criticalMB?: number;
 	};
-	"idle-watch"?: {
-		enabled?: boolean;
-		tickSeconds?: number;
-		graceSeconds?: number;
-		working?: string | string[];
-		idle?: string | string[];
-	};
 };
 
 function uniquePaths(paths: string[]): string[] {

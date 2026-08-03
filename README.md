@@ -35,68 +35,30 @@ Example:
 ```json
 {
   "extensions": {
-    "yu-notify": true,
-    "minimal": true,
-    "tool-counter": false
+    "memwatch": true,
+    "git": true,
+    "checkpoint": false
   }
 }
 ```
 
 Any omitted key defaults to `false`.
 
-## Notification backend config (`yu-notify`)
-
-`yu-notify` supports configurable desktop notification transport via `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global):
-
-```json
-{
-  "extensions": {
-    "yu-notify": true
-  },
-  "notify": {
-    "backend": "notifier",
-    "oscProtocol": "auto"
-  }
-}
-```
-
-Options:
-
-- `notify.backend`: `"notifier"` (default), `"osc"`, `"auto"`
-- `notify.oscProtocol`: `"auto"` (default), `"777"`, `"9"`, `"99"`
-
-Notes:
-
-- Default stays `notifier` (uses `terminal-notifier` on macOS).
-- Set `backend: "osc"` to force OSC notifications.
-- `auto` tries notifier first, then falls back to OSC.
-
 ## Available module keys
 
-- `agent-chain`
-- `agent-loop`
-- `agent-team`
-- `agents-mcp-loader`
 - `checkpoint`
-- `confirm-notify`
 - `cross-agent`
-- `damage-control`
 - `e`
-- `minimal`
-- `pi-pi`
 - `greetings`
-- `yu-notify`
-- `idle-watch`
-- `pure-focus`
-- `purpose-gate`
-- `session-replay`
-- `subagent-widget`
-- `system-select`
-- `theme-cycler`
-- `tilldone`
-- `tool-counter`
-- `tool-counter-widget`
-- `what`
+- `git`
+- `memwatch`
+- `pi-beads`
+- `aws`
+- `copy-slack`
+- `draft`
+- `session-id`
+- `helpy`
+- `yes`
 
 ## Commands
 
@@ -145,110 +107,8 @@ If you enable the `e` module, you also get:
 
 Supports absolute paths, relative paths, and current directory opening.
 
-## Idle watcher (`idle-watch`)
-
-Detects when pi has been in the same session state for too long and fires a cmux notification:
-
-- **working** too long — pi has been churning on a turn for longer than the threshold (stuck tool, runaway loop, slow LLM).
-- **idle** too long — pi finished working long ago and no new prompt arrived (user walked away).
-
-Detection uses `ctx.isIdle()` (equivalent to the TUI "Working..." indicator) by default; events (`agent_start`/`agent_end`) are opt-in as a second signal.
-
-### Config
-
-Add an `idle-watch` block to `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global):
-
-```json
-{
-  "extensions": { "idle-watch": true },
-  "idle-watch": {
-    "enabled": true,
-    "tickSeconds": 30,
-    "detection": { "events": false, "workingIndicator": true },
-    "states": {
-      "working": { "enabled": true, "threshold": "10m", "backoff": false },
-      "idle":    { "enabled": true, "threshold": "15m", "backoff": false }
-    },
-    "heartbeat": { "enabled": true, "path": "~/.pi/state/idle-{pid}.json" }
-  }
-}
-```
-
-`backoff` values per state:
-
-- `false` (default) — fire once when threshold crosses, silent until state changes.
-- `true` — use default schedule `["5m", "15m", "30m"]`.
-- array of duration strings — custom schedule, values are gaps *between* notifications.
-
-### Notification templates
-
-Each state accepts optional `title` and `body` templates. If unset, sensible defaults are used. Available tokens:
-
-- `{state}` — `working` or `idle`
-- `{elapsed}` — formatted duration (e.g. `12m30s`)
-- `{sessionName}` — result of `pi.getSessionName()` (the `◇ ...` summary line), empty if unset
-- `{cwd}` — working directory
-- `{pid}` — pi process pid
-
-Example: include the session summary in the body so you can tell sessions apart from the notification alone.
-
-```json
-"idle-watch": {
-  "states": {
-    "working": {
-      "title": "⏳ {sessionName}",
-      "body":  "working for {elapsed}"
-    },
-    "idle": {
-      "title": "💤 {sessionName}",
-      "body":  "idle for {elapsed} — come back?"
-    }
-  }
-}
-```
-
-### `/idle` command
-
-All overrides are session-only (wiped on pi restart):
-
-```
-/idle                              status + effective config
-/idle on | off                     enable / disable this session
-/idle working <dur>                override working threshold
-/idle idle <dur>                   override idle threshold
-/idle backoff on | off             toggle backoff for both states
-/idle backoff <state> on|off|<csv> per-state backoff, e.g. /idle backoff working 2m,5m,15m
-/idle reset                        clear fire counters
-```
-
-### Heartbeat
-
-When `heartbeat.enabled` is true, the module writes `~/.pi/state/idle-{pid}.json` on every transition and tick:
-
-```json
-{
-  "pid": 12345,
-  "session": "zellij-session-or-unknown",
-  "cwd": "/path",
-  "state": "idle",
-  "enteredStateAt": 1735582123000,
-  "lastTickAt": 1735582153000,
-  "cleanExit": false
-}
-```
-
-External watchers (cron, fish function, supervisor) can detect a hung pi with the heuristic:
-
-```
-now - lastTickAt > tickSeconds * 3  &&  !cleanExit
-```
-
 ## Notes
 
-- `yu-notify` is your zellij notification module (renamed from zellij-notify), implemented in TypeScript (no Python helper).
-- `yu-notify` is hook-driven, not slash-command-driven.
-- It notifies only when the agent run stops/returns to idle (waiting for user input), with session/tab context (`[session] tab`).
-- It also appends a status icon (emoji/symbol) to the end of the active zellij tab name (without duplicates).
 - Bundled support resources are included under `.pi/`:
   - agents
   - themes
