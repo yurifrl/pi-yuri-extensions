@@ -59,33 +59,41 @@ type BedrockCfg = { item: string; vault: string; account: string };
 type BedrockCache = { profile: string; token: string };
 
 export default function (pi: ExtensionAPI) {
-  const bedrockReady = bootstrapBedrockToken();
+  let bedrockEnabled = false;
 
   pi.on("session_start", async (_event, ctx) => {
+    const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
+    const { config } = await readPiYuConfig(cwd);
+    bedrockEnabled = config.bedrock?.enabled === true;
+    if (!bedrockEnabled) return;
+
+    const bedrockReady = bootstrapBedrockToken();
     await bedrockReady;
     syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, bedrockToken);
   });
 
-  // Re-apply right before every provider request so the token is guaranteed
-  // present even if a request fires before startup injection settles.
   pi.on("before_provider_request", (_event, ctx) => {
+    if (!bedrockEnabled) return;
+
     ensureTokenApplied();
     syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, bedrockToken);
   });
 
   pi.registerCommand("aws", {
-    description: "aws: /aws login [profiles...] | /aws bedrock [profile]",
+    description: "aws: /aws login [profiles...]",
     getArgumentCompletions: () => [
       {
         value: "login",
         label: "login",
         description: "Run `aws sso login` for configured AWS profiles, focusing the right Chrome profile first",
       },
-      {
-        value: "bedrock",
-        label: "bedrock",
-        description: "Switch the Bedrock API key profile; no arg follows the DEFAULT field",
-      },
+      ...(bedrockEnabled
+        ? [{
+            value: "bedrock",
+            label: "bedrock",
+            description: "Switch the Bedrock API key profile; no arg follows the DEFAULT field",
+          }]
+        : []),
     ],
     handler: async (args, ctx) => {
       const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
@@ -97,15 +105,18 @@ export default function (pi: ExtensionAPI) {
       const sub = (parts[0] ?? "").toLowerCase();
 
       if (!sub) {
-        ctx.ui.notify?.("aws: usage — /aws login [profile ...] | /aws bedrock [profile]", "info");
+        ctx.ui.notify?.(
+          bedrockEnabled ? "aws: usage — /aws login [profiles...] | /aws bedrock [profile]" : "aws: usage — /aws login [profiles...]",
+          "info",
+        );
         return;
       }
-      if (sub === "bedrock") {
+      if (sub === "bedrock" && bedrockEnabled) {
         await runBedrockSwitch(parts.slice(1), ctx, config);
         return;
       }
       if (sub !== "login") {
-        ctx.ui.notify?.(`aws: unknown subcommand '${sub}'. Try /aws login or /aws bedrock.`, "error");
+        ctx.ui.notify?.(bedrockEnabled ? `aws: unknown subcommand '${sub}'` : "aws: only /aws login is enabled", "error");
         return;
       }
 

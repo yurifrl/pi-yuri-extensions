@@ -24,6 +24,7 @@ export type PiYuConfig = {
 		browserApp?: string;
 	};
 	bedrock?: {
+		enabled?: boolean;
 		/** 1Password item id holding the per-profile Bedrock API keys. */
 		item?: string;
 		/** 1Password vault id. */
