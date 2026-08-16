@@ -12,10 +12,11 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-// State lives on globalThis, not a module variable: yolo.ts (a preboot
-// extension) and this module are loaded by different jiti instances
-// (moduleCache: false), so a plain module-level flag would NOT be shared.
-// globalThis is the same object across every jiti instance in the process.
+// State lives on globalThis, not a module variable: this module and other
+// packages that read __PI_YES_MODE__ (e.g. pi-fbr-extensions) are loaded by
+// different jiti instances (moduleCache: false), so a plain module-level flag
+// would NOT be shared. globalThis is the same object across every jiti
+// instance in the process.
 const YES_KEY = "__PI_YES_MODE__";
 
 export function enableYesMode(): void {
