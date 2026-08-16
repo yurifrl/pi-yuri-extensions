@@ -25,6 +25,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "pi-beads": () => import("./modules/pi-beads.ts"),
   "git": () => import("./modules/git.ts"),
   e: () => import("./modules/e.ts"),
+  exit: () => import("./modules/exit.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
