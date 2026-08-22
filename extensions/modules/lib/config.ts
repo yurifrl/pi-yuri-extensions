@@ -23,12 +23,16 @@ export type PiYuConfig = {
 		defaultChromeProfile?: string;
 		browserApp?: string;
 	};
+	envs?: {
+		/** Set to false to disable env sourcing (default: true). */
+		enabled?: boolean;
+		/** Active profile on startup: "work" | "personal" | "all" (default: "all"). */
+		defaultProfile?: string;
+	};
 	bedrock?: {
 		enabled?: boolean;
-		/** 1Password item id holding the per-profile Bedrock API keys. */
-		item?: string;
-		/** 1Password vault id. */
-		vault?: string;
+		/** 1Password item path: "vault/item" (names, not IDs). */
+		opItem?: string;
 		/** 1Password account id (shorthand or UUID). */
 		account?: string;
 	};

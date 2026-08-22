@@ -1,11 +1,10 @@
 import { DynamicBorder, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Container, Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { syncBedrockRuntimeApiKey } from "./lib/bedrock-auth.ts";
-import { type PiYuConfig, readPiYuConfig } from "./lib/config.ts";
+import { readPiYuConfig } from "./lib/config.ts";
 
 type State = "pending" | "focus" | "running" | "ok" | "error";
 type Row = { profile: string; chrome?: string; state: State; detail?: string; elapsedMs?: number };
@@ -29,71 +28,15 @@ const STATE_COLOR: Record<State, "dim" | "accent" | "warning" | "success" | "err
   error: "error",
 };
 
-// ── Bedrock API key (bearer token) management ───────────────────────────────
-//
-// pi's Bedrock provider reads AWS_BEARER_TOKEN_BEDROCK per request. Setting it
-// from inside the extension (at session_start, and via `/aws bedrock`) means
-// pi uses a dedicated, Bedrock-scoped API key for LLM calls no matter how pi
-// was launched. AWS_PROFILE is left untouched.
-//
-// The tokens live in a 1Password item with one section per environment
-// (production, staging, ...), each holding a *_BEARER_TOKEN_BEDROCK field. A
-// profile IS a section name; a top-level DEFAULT field names the default
-// section. A small 0600 cache avoids paying `op` latency on every launch.
-
-const BEDROCK_TOKEN_VAR = "AWS_BEARER_TOKEN_BEDROCK";
-const BEDROCK_TOKEN_LEAF = "BEARER_TOKEN_BEDROCK"; // suffix shared by all *_BEARER_TOKEN_BEDROCK labels
-const BEDROCK_DEFAULT_FIELD = "DEFAULT"; // item field whose value names the default section/profile
-const BEDROCK_FALLBACK_PROFILE = "production"; // used only if the DEFAULT field is absent
-// Hardcoded /tmp (not os.tmpdir(), which is /var/folders/... on macOS) to match
-// the user's existing /tmp/1pass-load-envs convention.
-const BEDROCK_CACHE = "/tmp/1pass-load-envs/bedrock.json";
-
-const DEFAULT_BEDROCK_ITEM = "3qbhk522hjhy4dflejwut4fnmu";
-const DEFAULT_BEDROCK_VAULT = "m5pemp735fkklqqlymzq6ik6ae";
-const DEFAULT_BEDROCK_ACCOUNT = "4IUZXN3PLFCM7H2JTJWWT5KYSQ";
-
-type OpField = { label?: string; value?: string; section?: { label?: string } };
-type OpItem = { fields?: OpField[] };
-type BedrockCfg = { item: string; vault: string; account: string };
-type BedrockCache = { profile: string; token: string };
-
 export default function (pi: ExtensionAPI) {
-  let bedrockEnabled = false;
-
-  pi.on("session_start", async (_event, ctx) => {
-    const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
-    const { config } = await readPiYuConfig(cwd);
-    bedrockEnabled = config.bedrock?.enabled === true;
-    if (!bedrockEnabled) return;
-
-    const bedrockReady = bootstrapBedrockToken();
-    await bedrockReady;
-    syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, bedrockToken);
-  });
-
-  pi.on("before_provider_request", (_event, ctx) => {
-    if (!bedrockEnabled) return;
-
-    ensureTokenApplied();
-    syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, bedrockToken);
-  });
-
   pi.registerCommand("aws", {
     description: "aws: /aws login [profiles...]",
     getArgumentCompletions: () => [
       {
         value: "login",
         label: "login",
-        description: "Run `aws sso login` for configured AWS profiles, focusing the right Chrome profile first",
+        description: "Run `aws sso login` for configured AWS profiles",
       },
-      ...(bedrockEnabled
-        ? [{
-            value: "bedrock",
-            label: "bedrock",
-            description: "Switch the Bedrock API key profile; no arg follows the DEFAULT field",
-          }]
-        : []),
     ],
     handler: async (args, ctx) => {
       const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
@@ -104,19 +47,8 @@ export default function (pi: ExtensionAPI) {
       const parts = raw.split(/\s+/).filter(Boolean);
       const sub = (parts[0] ?? "").toLowerCase();
 
-      if (!sub) {
-        ctx.ui.notify?.(
-          bedrockEnabled ? "aws: usage — /aws login [profiles...] | /aws bedrock [profile]" : "aws: usage — /aws login [profiles...]",
-          "info",
-        );
-        return;
-      }
-      if (sub === "bedrock" && bedrockEnabled) {
-        await runBedrockSwitch(parts.slice(1), ctx, config);
-        return;
-      }
-      if (sub !== "login") {
-        ctx.ui.notify?.(bedrockEnabled ? `aws: unknown subcommand '${sub}'` : "aws: only /aws login is enabled", "error");
+      if (!sub || sub !== "login") {
+        ctx.ui.notify?.("aws: usage — /aws login [profiles...]", "info");
         return;
       }
 
@@ -138,8 +70,6 @@ export default function (pi: ExtensionAPI) {
         chrome: chromeProfiles[p] ?? defaultChrome,
         state: "pending",
       }));
-
-      let widgetInvalidate: (() => void) | undefined;
 
       ctx.ui.setWidget(
         WIDGET_KEY,
@@ -176,24 +106,18 @@ export default function (pi: ExtensionAPI) {
             },
             invalidate() {
               container.invalidate();
-              widgetInvalidate?.();
             },
           };
         },
         { placement: "belowEditor" },
       );
 
-      const refresh = () => {
-        // Re-set the widget to force a re-render of current state.
-        ctx.ui.invalidate?.();
-      };
-
+      const refresh = () => { ctx.ui.invalidate?.(); };
       const errors: string[] = [];
       const ok: string[] = [];
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-
         row.state = "running";
         row.detail = "requesting SSO url…";
         refresh();
@@ -217,7 +141,6 @@ export default function (pi: ExtensionAPI) {
         refresh();
       }
 
-      // Leave the widget up briefly so the final state is visible, then clear.
       await new Promise((r) => setTimeout(r, 1500));
       ctx.ui.setWidget(WIDGET_KEY, undefined);
 
@@ -232,6 +155,8 @@ export default function (pi: ExtensionAPI) {
     },
   });
 }
+
+// ── SSO login helpers ───────────────────────────────────────────────────────
 
 const URL_REGEX = /https?:\/\/\S+/;
 
@@ -256,10 +181,7 @@ function runAwsSsoLogin(
 
     const child = spawn("aws", ["sso", "login", "--profile", profile], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        BROWSER: wrapper,
-      },
+      env: { ...process.env, BROWSER: wrapper },
     });
 
     let buffer = "";
@@ -276,32 +198,19 @@ function runAwsSsoLogin(
           const match = line.match(URL_REGEX);
           if (match && match[0].includes("oidc")) {
             sawUrl = true;
-            onStatus(
-              `opened in ${browserApp}${chromeProfile ? ` (${chromeProfile})` : ""}, waiting for approval…`,
-            );
+            onStatus(`opened in ${browserApp}${chromeProfile ? ` (${chromeProfile})` : ""}, waiting for approval…`);
           }
         }
-        if (/Successfully logged into/i.test(line)) {
-          onStatus("finalizing…");
-        }
+        if (/Successfully logged into/i.test(line)) onStatus("finalizing…");
       }
     };
 
     child.stdout.on("data", handleChunk);
-    child.stderr.on("data", (d) => {
-      errBuffer += d.toString("utf8");
-      handleChunk(d);
-    });
+    child.stderr.on("data", (d) => { errBuffer += d.toString("utf8"); handleChunk(d); });
 
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new Error("timed out after 5m"));
-    }, 300_000);
+    const timeout = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("timed out after 5m")); }, 300_000);
 
-    child.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
+    child.on("error", (err) => { clearTimeout(timeout); reject(err); });
     child.on("close", (code) => {
       clearTimeout(timeout);
       if (code === 0) resolve();
@@ -311,145 +220,4 @@ function runAwsSsoLogin(
       }
     });
   });
-}
-
-// ── Bedrock helpers ─────────────────────────────────────────────────────────
-
-function bedrockCfg(config: PiYuConfig): BedrockCfg {
-  const b = config.bedrock ?? {};
-  return {
-    item: b.item ?? DEFAULT_BEDROCK_ITEM,
-    vault: b.vault ?? DEFAULT_BEDROCK_VAULT,
-    account: b.account ?? DEFAULT_BEDROCK_ACCOUNT,
-  };
-}
-
-// runOp invokes the 1Password CLI and resolves its stdout. Used non-interactively
-// (the desktop app session authorizes reads), so it never blocks on a prompt.
-function runOp(args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("op", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => (out += d.toString("utf8")));
-    child.stderr.on("data", (d) => (err += d.toString("utf8")));
-    child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(err.trim() || `op exit ${code}`))));
-  });
-}
-
-async function fetchBedrockItem(cfg: BedrockCfg): Promise<OpItem> {
-  const raw = await runOp(["item", "get", cfg.item, "--vault", cfg.vault, "--account", cfg.account, "--format", "json"]);
-  return JSON.parse(raw) as OpItem;
-}
-
-// defaultProfile returns the section named by the item's top-level DEFAULT
-// field (e.g. "production"), or the fallback if that field is absent.
-function defaultProfile(item: OpItem): string {
-  for (const f of item.fields ?? []) {
-    if (!f.section && f.label?.toUpperCase() === BEDROCK_DEFAULT_FIELD && f.value) return f.value;
-  }
-  return BEDROCK_FALLBACK_PROFILE;
-}
-
-// bearerTokenFor returns the Bedrock token for a profile, where a profile IS a
-// 1Password section name (e.g. "production"). The token is that section's
-// *_BEARER_TOKEN_BEDROCK field — matched by suffix so a stray label typo
-// (WS_... vs AWS_...) still resolves.
-function bearerTokenFor(item: OpItem, profile: string): string | null {
-  for (const f of item.fields ?? []) {
-    if (
-      f.section?.label?.toLowerCase() === profile.toLowerCase() &&
-      f.label?.toUpperCase().endsWith(BEDROCK_TOKEN_LEAF) &&
-      f.value
-    ) {
-      return f.value;
-    }
-  }
-  return null;
-}
-
-// resolveToken fetches the item and returns the token for a profile. An empty
-// profile (or "default") follows the DEFAULT field.
-async function resolveToken(profile: string, cfg: BedrockCfg): Promise<BedrockCache> {
-  const item = await fetchBedrockItem(cfg);
-  let key = profile;
-  if (!key || key.toLowerCase() === "default") key = defaultProfile(item);
-  const token = bearerTokenFor(item, key);
-  if (!token) throw new Error(`profile "${key}": no ${BEDROCK_TOKEN_VAR} field in 1Password item`);
-  return { profile: key, token };
-}
-
-function readCache(): BedrockCache | null {
-  try {
-    const c = JSON.parse(readFileSync(BEDROCK_CACHE, "utf8")) as BedrockCache;
-    if (c && typeof c.profile === "string" && typeof c.token === "string" && c.token.length > 0) return c;
-  } catch {
-    // missing/corrupt cache -> treat as cold
-  }
-  return null;
-}
-
-function writeCache(c: BedrockCache): void {
-  try {
-    mkdirSync(path.dirname(BEDROCK_CACHE), { recursive: true, mode: 0o700 });
-    writeFileSync(BEDROCK_CACHE, JSON.stringify(c), { mode: 0o600 });
-  } catch {
-    // best effort; a failed cache write just means the next launch re-fetches
-  }
-}
-
-// applyToken sets or clears AWS_BEARER_TOKEN_BEDROCK in this process so pi's
-// Bedrock provider picks it up. Never touches AWS_PROFILE.
-function applyToken(token: string | undefined): void {
-  if (token) process.env[BEDROCK_TOKEN_VAR] = token;
-  else delete process.env[BEDROCK_TOKEN_VAR];
-}
-
-let bedrockToken: string | undefined;
-
-// ensureTokenApplied makes process.env reflect the current token. On first call
-// it loads from the cache (sync). Cheap and idempotent — safe to call before
-// every provider request, which defeats any extension-load race (pi reads
-// AWS_BEARER_TOKEN_BEDROCK per request, so this guarantees it is set in time).
-function ensureTokenApplied(): void {
-  if (bedrockToken === undefined) bedrockToken = readCache()?.token;
-  applyToken(bedrockToken);
-}
-
-// bootstrapBedrockToken runs at extension load: apply the cached token instantly,
-// or fetch the DEFAULT profile from 1Password on a cold cache.
-function bootstrapBedrockToken(): Promise<void> {
-  const cached = readCache();
-  if (cached) {
-    bedrockToken = cached.token;
-    applyToken(bedrockToken);
-    return Promise.resolve();
-  }
-  return resolveToken("", bedrockCfg({}))
-    .then((c) => {
-      bedrockToken = c.token;
-      applyToken(bedrockToken);
-      writeCache(c);
-    })
-    .catch(() => {
-      bedrockToken = undefined;
-      applyToken(undefined);
-    });
-}
-
-// runBedrockSwitch handles `/aws bedrock [profile]`: re-resolve from 1Password,
-// update this process's env + the cache, and report the active profile.
-async function runBedrockSwitch(args: string[], ctx: any, config: PiYuConfig): Promise<void> {
-  const profile = (args[0] ?? "").trim();
-  try {
-    const c = await resolveToken(profile, bedrockCfg(config));
-    bedrockToken = c.token;
-    applyToken(c.token);
-    syncBedrockRuntimeApiKey(ctx.modelRegistry.authStorage, c.token);
-    writeCache(c);
-    ctx.ui.notify?.(`aws bedrock: using ${c.profile} token (AWS_BEARER_TOKEN_BEDROCK set)`, "success");
-  } catch (e) {
-    ctx.ui.notify?.(`aws bedrock: ${e instanceof Error ? e.message : String(e)}`, "error");
-  }
 }
