@@ -17,21 +17,23 @@ function stateRoot(cwd: string): string {
   return join(cwd, ".agents", "conductor");
 }
 
-function configuredRun(cwd: string): ConfiguredRun | undefined {
+function configuredRun(cwd: string, overrides: Partial<ConfiguredRun> = {}): ConfiguredRun | undefined {
   try {
     const agentRaw: unknown = JSON.parse(readFileSync(join(cwd, ".agents", "config.json"), "utf8"));
     const conductorRaw: unknown = JSON.parse(readFileSync(join(stateRoot(cwd), "config.json"), "utf8"));
-    if (!isRecord(agentRaw) || !isRecord(conductorRaw) || conductorRaw.workers !== undefined) return undefined;
+    if (!isRecord(agentRaw) || !isRecord(conductorRaw)) return undefined;
 
     const models = agentRaw.models;
     const localConductor = agentRaw.conductor;
     const configuredRun = conductorRaw.run;
-    if (!isRecord(models) || (localConductor !== undefined && !isRecord(localConductor)) || (configuredRun !== undefined && !isRecord(configuredRun))) return undefined;
+    const workers = conductorRaw.workers;
+    if (!isRecord(models) || (localConductor !== undefined && !isRecord(localConductor)) || (configuredRun !== undefined && !isRecord(configuredRun)) || (workers !== undefined && !isRecord(workers))) return undefined;
 
-    const model = nonBlankString(models.default);
+    const configuredModel = nonBlankString(models.default) ?? (workers ? nonBlankString(workers.model) : undefined);
     const localEpic = localConductor ? nonBlankString(localConductor.epic) : undefined;
     const fallbackEpic = configuredRun ? nonBlankString(configuredRun.epic) : undefined;
-    const epicId = localEpic ?? fallbackEpic;
+    const epicId = overrides.epicId ?? localEpic ?? fallbackEpic;
+    const model = overrides.model ?? configuredModel;
     return epicId && model ? Object.freeze({ epicId, model }) : undefined;
   } catch {
     return undefined;
@@ -114,9 +116,9 @@ export default function conductor(pi: ExtensionAPI): void {
     }
   };
 
-  const startSupervisor = (ctx: any, announce: boolean): boolean => {
+  const startSupervisor = (ctx: any, announce: boolean, run?: ConfiguredRun): boolean => {
     const cwd = cwdOf(ctx);
-    if (timer || !configuredRun(cwd)) return false;
+    if (timer || !(run ?? configuredRun(cwd))) return false;
     timer = setInterval(() => { void tick(ctx, false); }, 5 * 60_000);
     timer.unref?.();
     void tick(ctx, announce);
@@ -137,18 +139,29 @@ export default function conductor(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("conductor", {
-    description: "Supervise Conductor. /conductor start | status | tick",
+    description: "Supervise Conductor. /conductor start [--epic <bead> --model <id>] | status | tick",
     handler: async (args, ctx) => {
       const cwd = cwdOf(ctx);
-      const [verb] = args.trim().split(/\s+/);
+      const tokens = args.trim().split(/\s+/);
+      const [verb] = tokens;
+      const option = (name: string): string | undefined => {
+        const index = tokens.indexOf(name);
+        return index >= 0 ? tokens[index + 1] : undefined;
+      };
       if (verb === "start") {
-        const run = configuredRun(cwd);
-        if (!run) {
-          ctx.ui.notify("conductor configuration missing models.default in .agents/config.json or conductor epic", "error");
+        const epicId = option("--epic");
+        const model = option("--model");
+        if ((epicId && !model) || (!epicId && model)) {
+          ctx.ui.notify("conductor start requires both --epic <bead> and --model <id>", "error");
           return;
         }
-        ctx.ui.notify(`conductor started: ${run.epicId}`, "success");
-        if (!startSupervisor(ctx, true)) void tick(ctx, true);
+        const run = configuredRun(cwd, epicId && model ? { epicId, model } : {});
+        if (!run) {
+          ctx.ui.notify("conductor configuration missing run.epic and workers.model", "error");
+          return;
+        }
+        ctx.ui.notify(`conductor started: ${run.epicId} / ${run.model}`, "success");
+        if (!startSupervisor(ctx, true, run)) void tick(ctx, true);
         return;
       }
       if (verb === "status") {
@@ -157,7 +170,7 @@ export default function conductor(pi: ExtensionAPI): void {
         return;
       }
       if (verb === "tick") { await tick(ctx, true); return; }
-      ctx.ui.notify("Usage: /conductor start | status | tick", "warning");
+      ctx.ui.notify("Usage: /conductor start [--epic <bead> --model <id>] | status | tick", "warning");
     },
   });
 }
