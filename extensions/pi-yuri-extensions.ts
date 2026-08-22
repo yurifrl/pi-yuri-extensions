@@ -25,6 +25,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "git": () => import("./modules/git.ts"),
   e: () => import("./modules/e.ts"),
   envs: () => import("./modules/envs.ts"),
+  conductor: () => import("./modules/conductor.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {
