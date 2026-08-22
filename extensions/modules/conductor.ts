@@ -116,24 +116,24 @@ export default function conductor(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("conductor", {
-    description: "Bind and supervise Conductor. /conductor start <epic> <model> | status | tick",
+    description: "Bind and supervise Conductor. /conductor start | status | tick",
     handler: async (args, ctx) => {
       const cwd = cwdOf(ctx);
-      const [verb, epic, model] = args.trim().split(/\s+/);
+      const [verb] = args.trim().split(/\s+/);
       if (verb === "start") {
-        if (!epic || !model) { ctx.ui.notify("Usage: /conductor start <epic> <model>", "warning"); return; }
-        const result = await execute(["bind", "--epic", epic, "--model", model, "--cwd", cwd, "--json"], cwd);
-        ctx.ui.notify(result.code === 0 ? `conductor bound: ${epic}` : `conductor bind refused: ${result.stderr || result.stdout}`, result.code === 0 ? "success" : "error");
+        const result = await execute(["bind", "--cwd", cwd, "--json"], cwd);
+        const run = boundRun(cwd);
+        ctx.ui.notify(result.code === 0 && run ? `conductor bound: ${run.epicId}` : `conductor bind refused: ${result.stderr || result.stdout}`, result.code === 0 ? "success" : "error");
         if (result.code === 0) void tick(ctx, true);
         return;
       }
       if (verb === "status") {
         const run = boundRun(cwd);
-        ctx.ui.notify(run ? `conductor bound: ${run.epicId} / ${run.model}` : "conductor not bound; use /conductor start <epic> <model>", run ? "info" : "warning");
+        ctx.ui.notify(run ? `conductor bound: ${run.epicId} / ${run.model}` : "conductor not bound; configure .agents/conductor/config.json then use /conductor start", run ? "info" : "warning");
         return;
       }
       if (verb === "tick") { await tick(ctx, true); return; }
-      ctx.ui.notify("Usage: /conductor start <epic> <model> | status | tick", "warning");
+      ctx.ui.notify("Usage: /conductor start | status | tick", "warning");
     },
   });
 }
