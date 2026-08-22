@@ -1,13 +1,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const RUNTIME_ROOT = join(process.env.HOME ?? "/Users/yuri", ".pi", "agent", "skills", "conductor");
 const CLI = join(RUNTIME_ROOT, "src", "cli.ts");
 
 type Execution = Readonly<{ code: number | null; stdout: string; stderr: string }>;
-type ControllerRun = Readonly<{ epicId: string; model: string }>;
+type ConfiguredRun = Readonly<{ epicId: string; model: string }>;
 
 function cwdOf(ctx: any): string {
   return typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
@@ -17,13 +17,18 @@ function stateRoot(cwd: string): string {
   return join(cwd, ".agents", "conductor");
 }
 
-function boundRun(cwd: string): ControllerRun | undefined {
+function configuredRun(cwd: string): ConfiguredRun | undefined {
   try {
-    const raw: unknown = JSON.parse(readFileSync(join(stateRoot(cwd), "run.json"), "utf8"));
+    const raw: unknown = JSON.parse(readFileSync(join(stateRoot(cwd), "config.json"), "utf8"));
     if (!raw || typeof raw !== "object") return undefined;
     const value = raw as Record<string, unknown>;
-    return typeof value.epicId === "string" && typeof value.model === "string"
-      ? Object.freeze({ epicId: value.epicId, model: value.model })
+    const run = value.run;
+    const workers = value.workers;
+    if (!run || typeof run !== "object" || !workers || typeof workers !== "object") return undefined;
+    const epicId = (run as Record<string, unknown>).epic;
+    const model = (workers as Record<string, unknown>).model;
+    return typeof epicId === "string" && epicId && typeof model === "string" && model
+      ? Object.freeze({ epicId, model })
       : undefined;
   } catch {
     return undefined;
@@ -58,15 +63,15 @@ function oneLine(result: Execution): string {
 
 function requestLaunchBridge(pi: ExtensionAPI, stdout: string): void {
   try {
-    const value = JSON.parse(stdout) as { toLaunch?: unknown[]; run?: ControllerRun };
+    const value = JSON.parse(stdout) as { toLaunch?: unknown[]; configuration?: ConfiguredRun };
     const intents = value.toLaunch?.filter((id): id is string => typeof id === "string") ?? [];
-    if (intents.length === 0 || !value.run) return;
+    if (intents.length === 0 || !value.configuration) return;
     // Runtime, not stale skill prose, announces exact durable launch work. Pi owns
     // the subagent tool, so this bridge requests that capability without inventing
     // worker identity or retrying an already reserved intent.
     const body = [
       "<conductor-launch-bridge>",
-      `Bound run: ${value.run.epicId} / ${value.run.model}.`,
+      `Configured run: ${value.configuration.epicId} / ${value.configuration.model}.`,
       `Reserved intents: ${intents.join(", ")}.`,
       "For each intent: call conductor prepare-launch, invoke subagent with emitted fields verbatim, confirm-visible, then heartbeat. Do not use shadow-tick or raw Herdr.",
       "</conductor-launch-bridge>",
@@ -75,10 +80,9 @@ function requestLaunchBridge(pi: ExtensionAPI, stdout: string): void {
   } catch { /* heartbeat envelope is authoritative only when valid JSON */ }
 }
 /**
- * Supervisor owns periodic active observation. It never takes an epic/model from
- * conversational context: bind creates durable identity, heartbeat derives it.
- * It emits only durable bridge instructions for Pi-owned subagent calls; every
- * worker identity/prompt still comes from `prepare-launch`, never session prose.
+ * Supervisor reads consumer config for identity on every tick. It emits only
+ * config-derived bridge instructions for Pi-owned subagent calls; every worker
+ * identity/prompt still comes from `prepare-launch`, never session prose.
  */
 export default function conductor(pi: ExtensionAPI): void {
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -87,7 +91,7 @@ export default function conductor(pi: ExtensionAPI): void {
 
   const tick = async (ctx: any, announce: boolean): Promise<Execution | undefined> => {
     const cwd = cwdOf(ctx);
-    if (running || !existsSync(join(stateRoot(cwd), "run.json"))) return undefined;
+    if (running || !configuredRun(cwd)) return undefined;
     running = true;
     try {
       const result = await heartbeat(cwd);
@@ -99,12 +103,18 @@ export default function conductor(pi: ExtensionAPI): void {
     }
   };
 
-  pi.on("session_start", async (_event, ctx) => {
-    currentCwd = cwdOf(ctx);
-    if (!boundRun(currentCwd) || timer) return;
+  const startSupervisor = (ctx: any, announce: boolean): boolean => {
+    const cwd = cwdOf(ctx);
+    if (timer || !configuredRun(cwd)) return false;
     timer = setInterval(() => { void tick(ctx, false); }, 5 * 60_000);
     timer.unref?.();
-    void tick(ctx, false);
+    void tick(ctx, announce);
+    return true;
+  };
+
+  pi.on("session_start", async (_event, ctx) => {
+    currentCwd = cwdOf(ctx);
+    startSupervisor(ctx, false);
   });
 
   pi.on("agent_end", async (_event, ctx) => { void tick(ctx, false); });
@@ -116,20 +126,23 @@ export default function conductor(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("conductor", {
-    description: "Bind and supervise Conductor. /conductor start | status | tick",
+    description: "Supervise Conductor. /conductor start | status | tick",
     handler: async (args, ctx) => {
       const cwd = cwdOf(ctx);
       const [verb] = args.trim().split(/\s+/);
       if (verb === "start") {
-        const result = await execute(["bind", "--cwd", cwd, "--json"], cwd);
-        const run = boundRun(cwd);
-        ctx.ui.notify(result.code === 0 && run ? `conductor bound: ${run.epicId}` : `conductor bind refused: ${result.stderr || result.stdout}`, result.code === 0 ? "success" : "error");
-        if (result.code === 0) void tick(ctx, true);
+        const run = configuredRun(cwd);
+        if (!run) {
+          ctx.ui.notify("conductor configuration missing run.epic or workers.model", "error");
+          return;
+        }
+        ctx.ui.notify(`conductor started: ${run.epicId}`, "success");
+        if (!startSupervisor(ctx, true)) void tick(ctx, true);
         return;
       }
       if (verb === "status") {
-        const run = boundRun(cwd);
-        ctx.ui.notify(run ? `conductor bound: ${run.epicId} / ${run.model}` : "conductor not bound; configure .agents/conductor/config.json then use /conductor start", run ? "info" : "warning");
+        const run = configuredRun(cwd);
+        ctx.ui.notify(run ? `conductor configured: ${run.epicId} / ${run.model}` : "conductor not configured; set run.epic and workers.model", run ? "info" : "warning");
         return;
       }
       if (verb === "tick") { await tick(ctx, true); return; }
