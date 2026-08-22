@@ -19,20 +19,31 @@ function stateRoot(cwd: string): string {
 
 function configuredRun(cwd: string): ConfiguredRun | undefined {
   try {
-    const raw: unknown = JSON.parse(readFileSync(join(stateRoot(cwd), "config.json"), "utf8"));
-    if (!raw || typeof raw !== "object") return undefined;
-    const value = raw as Record<string, unknown>;
-    const run = value.run;
-    const workers = value.workers;
-    if (!run || typeof run !== "object" || !workers || typeof workers !== "object") return undefined;
-    const epicId = (run as Record<string, unknown>).epic;
-    const model = (workers as Record<string, unknown>).model;
-    return typeof epicId === "string" && epicId && typeof model === "string" && model
-      ? Object.freeze({ epicId, model })
-      : undefined;
+    const agentRaw: unknown = JSON.parse(readFileSync(join(cwd, ".agents", "config.json"), "utf8"));
+    const conductorRaw: unknown = JSON.parse(readFileSync(join(stateRoot(cwd), "config.json"), "utf8"));
+    if (!isRecord(agentRaw) || !isRecord(conductorRaw) || conductorRaw.workers !== undefined) return undefined;
+
+    const models = agentRaw.models;
+    const localConductor = agentRaw.conductor;
+    const configuredRun = conductorRaw.run;
+    if (!isRecord(models) || (localConductor !== undefined && !isRecord(localConductor)) || (configuredRun !== undefined && !isRecord(configuredRun))) return undefined;
+
+    const model = nonBlankString(models.default);
+    const localEpic = localConductor ? nonBlankString(localConductor.epic) : undefined;
+    const fallbackEpic = configuredRun ? nonBlankString(configuredRun.epic) : undefined;
+    const epicId = localEpic ?? fallbackEpic;
+    return epicId && model ? Object.freeze({ epicId, model }) : undefined;
   } catch {
     return undefined;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonBlankString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function execute(args: readonly string[], cwd: string): Promise<Execution> {
@@ -71,7 +82,7 @@ function requestLaunchBridge(pi: ExtensionAPI, stdout: string): void {
     // worker identity or retrying an already reserved intent.
     const body = [
       "<conductor-launch-bridge>",
-      `Configured run: ${value.configuration.epicId} / ${value.configuration.model}.`,
+      `Configured run: ${value.configuration.epicId}.`,
       `Reserved intents: ${intents.join(", ")}.`,
       "For each intent: call conductor prepare-launch, invoke subagent with emitted fields verbatim, confirm-visible, then heartbeat. Do not use shadow-tick or raw Herdr.",
       "</conductor-launch-bridge>",
@@ -133,7 +144,7 @@ export default function conductor(pi: ExtensionAPI): void {
       if (verb === "start") {
         const run = configuredRun(cwd);
         if (!run) {
-          ctx.ui.notify("conductor configuration missing run.epic or workers.model", "error");
+          ctx.ui.notify("conductor configuration missing models.default in .agents/config.json or conductor epic", "error");
           return;
         }
         ctx.ui.notify(`conductor started: ${run.epicId}`, "success");
@@ -142,7 +153,7 @@ export default function conductor(pi: ExtensionAPI): void {
       }
       if (verb === "status") {
         const run = configuredRun(cwd);
-        ctx.ui.notify(run ? `conductor configured: ${run.epicId} / ${run.model}` : "conductor not configured; set run.epic and workers.model", run ? "info" : "warning");
+        ctx.ui.notify(run ? `conductor configured: ${run.epicId} / ${run.model}` : "conductor not configured; set models.default and conductor.epic in .agents/config.json", run ? "info" : "warning");
         return;
       }
       if (verb === "tick") { await tick(ctx, true); return; }
