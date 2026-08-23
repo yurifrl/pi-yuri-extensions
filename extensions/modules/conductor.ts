@@ -19,21 +19,13 @@ function stateRoot(cwd: string): string {
 
 function configuredRun(cwd: string, overrides: Partial<ConfiguredRun> = {}): ConfiguredRun | undefined {
   try {
-    const agentRaw: unknown = JSON.parse(readFileSync(join(cwd, ".agents", "config.json"), "utf8"));
     const conductorRaw: unknown = JSON.parse(readFileSync(join(stateRoot(cwd), "config.json"), "utf8"));
-    if (!isRecord(agentRaw) || !isRecord(conductorRaw)) return undefined;
-
-    const models = agentRaw.models;
-    const localConductor = agentRaw.conductor;
-    const configuredRun = conductorRaw.run;
+    if (!isRecord(conductorRaw)) return undefined;
+    const run = conductorRaw.run;
     const workers = conductorRaw.workers;
-    if (!isRecord(models) || (localConductor !== undefined && !isRecord(localConductor)) || (configuredRun !== undefined && !isRecord(configuredRun)) || (workers !== undefined && !isRecord(workers))) return undefined;
-
-    const configuredModel = nonBlankString(models.default) ?? (workers ? nonBlankString(workers.model) : undefined);
-    const localEpic = localConductor ? nonBlankString(localConductor.epic) : undefined;
-    const fallbackEpic = configuredRun ? nonBlankString(configuredRun.epic) : undefined;
-    const epicId = overrides.epicId ?? localEpic ?? fallbackEpic;
-    const model = overrides.model ?? configuredModel;
+    if (!isRecord(run) || !isRecord(workers)) return undefined;
+    const epicId = overrides.epicId ?? nonBlankString(run.epic);
+    const model = overrides.model ?? nonBlankString(workers.model);
     return epicId && model ? Object.freeze({ epicId, model }) : undefined;
   } catch {
     return undefined;
@@ -64,33 +56,56 @@ async function heartbeat(cwd: string): Promise<Execution> {
   return execute(["heartbeat", "--cwd", cwd, "--now", new Date().toISOString(), "--json"], cwd);
 }
 
-function oneLine(result: Execution): string {
-  if (result.code === 0) {
-    try {
-      const value = JSON.parse(result.stdout) as { status?: { legalReady?: number }; toLaunch?: unknown[] };
-      return `conductor heartbeat: ready=${value.status?.legalReady ?? 0}, launch=${value.toLaunch?.length ?? 0}`;
-    } catch { return "conductor heartbeat completed"; }
-  }
-  return `conductor heartbeat refused: ${result.stderr || result.stdout}`;
+type HeartbeatJson = Readonly<{
+  status?: { legalReady?: number; verifiedLive?: number; reserved?: number; deficit?: number };
+  toLaunch?: readonly string[];
+  recovery?: { state: string; reason?: string; graphRevision?: number };
+}>;
+
+function parseHeartbeat(stdout: string): HeartbeatJson | undefined {
+  try { return JSON.parse(stdout) as HeartbeatJson; } catch { return undefined; }
 }
 
-function requestLaunchBridge(pi: ExtensionAPI, stdout: string): void {
-  try {
-    const value = JSON.parse(stdout) as { toLaunch?: unknown[]; configuration?: ConfiguredRun };
-    const intents = value.toLaunch?.filter((id): id is string => typeof id === "string") ?? [];
-    if (intents.length === 0 || !value.configuration) return;
-    // Runtime, not stale skill prose, announces exact durable launch work. Pi owns
-    // the subagent tool, so this bridge requests that capability without inventing
-    // worker identity or retrying an already reserved intent.
-    const body = [
-      "<conductor-launch-bridge>",
-      `Configured run: ${value.configuration.epicId}.`,
-      `Reserved intents: ${intents.join(", ")}.`,
-      "For each intent: call conductor prepare-launch, invoke subagent with emitted fields verbatim, confirm-visible, then heartbeat. Do not use shadow-tick or raw Herdr.",
-      "</conductor-launch-bridge>",
-    ].join("\n");
-    pi.sendUserMessage(body, { deliverAs: "followUp" });
-  } catch { /* heartbeat envelope is authoritative only when valid JSON */ }
+function formatHeartbeat(run: ConfiguredRun, result: Execution): string {
+  if (result.code !== 0) {
+    const msg = result.stderr || result.stdout || "unknown error";
+    return `conductor heartbeat failed: ${msg}`;
+  }
+  const data = parseHeartbeat(result.stdout);
+  if (!data) return "conductor heartbeat: no JSON output";
+  const parts: string[] = [];
+  parts.push(`epic=${run.epicId}`);
+  parts.push(`model=${run.model}`);
+  if (data.recovery) {
+    const rev = data.recovery.graphRevision !== undefined ? `@r${data.recovery.graphRevision}` : "";
+    const reason = data.recovery.reason ? `(${data.recovery.reason})` : "";
+    parts.push(`recovery=${data.recovery.state}${rev}${reason}`);
+  }
+  if (data.status) {
+    const s = data.status;
+    parts.push(`ready=${s.legalReady ?? 0}`);
+    parts.push(`live=${s.verifiedLive ?? 0}`);
+    parts.push(`reserved=${s.reserved ?? 0}`);
+    if (s.deficit && s.deficit > 0) parts.push(`deficit=${s.deficit}`);
+  }
+  parts.push(`launch=${data.toLaunch?.length ?? 0}`);
+  return `conductor: ${parts.join(" | ")}`;
+}
+
+function requestLaunchBridge(pi: ExtensionAPI, stdout: string, run: ConfiguredRun): void {
+  const data = parseHeartbeat(stdout);
+  if (!data) return;
+  if (data.recovery?.state === "blocked") return;
+  const intents = data.toLaunch?.filter((id): id is string => typeof id === "string") ?? [];
+  if (intents.length === 0) return;
+  const body = [
+    "<conductor-launch-bridge>",
+    `Configured run: ${run.epicId}.`,
+    `Reserved intents: ${intents.join(", ")}.`,
+    "For each intent: call conductor prepare-launch, invoke subagent with emitted fields verbatim, confirm-visible, then heartbeat. Do not use shadow-tick or raw Herdr.",
+    "</conductor-launch-bridge>",
+  ].join("\n");
+  pi.sendUserMessage(body, { deliverAs: "followUp" });
 }
 /**
  * Supervisor reads consumer config for identity on every tick. It emits only
@@ -104,12 +119,13 @@ export default function conductor(pi: ExtensionAPI): void {
 
   const tick = async (ctx: any, announce: boolean): Promise<Execution | undefined> => {
     const cwd = cwdOf(ctx);
-    if (running || !configuredRun(cwd)) return undefined;
+    const run = configuredRun(cwd);
+    if (running || !run) return undefined;
     running = true;
     try {
       const result = await heartbeat(cwd);
-      if (announce) ctx.ui.notify(oneLine(result), result.code === 0 ? "info" : "warning");
-      if (result.code === 0) requestLaunchBridge(pi, result.stdout);
+      if (announce) ctx.ui.notify(formatHeartbeat(run, result), result.code === 0 ? "info" : "warning");
+      if (result.code === 0) requestLaunchBridge(pi, result.stdout, run);
       return result;
     } finally {
       running = false;
@@ -127,10 +143,14 @@ export default function conductor(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     currentCwd = cwdOf(ctx);
-    startSupervisor(ctx, false);
+    // Explicit `/conductor start` owns first dispatch. Fresh Pi sessions must
+    // never receive an unsolicited heartbeat or conductor follow-up message.
   });
 
-  pi.on("agent_end", async (_event, ctx) => { void tick(ctx, false); });
+  // Do not heartbeat from `agent_end`: extension follow-ups themselves create
+  // agent turns, turning lifecycle observation into a self-prompt loop. Timer
+  // ticks begin only after explicit `/conductor start`.
+  pi.on("agent_end", async () => {});
 
   pi.on("session_shutdown", () => {
     if (timer) clearInterval(timer);
@@ -149,28 +169,25 @@ export default function conductor(pi: ExtensionAPI): void {
         return index >= 0 ? tokens[index + 1] : undefined;
       };
       if (verb === "start") {
-        const epicId = option("--epic");
-        const model = option("--model");
-        if ((epicId && !model) || (!epicId && model)) {
-          ctx.ui.notify("conductor start requires both --epic <bead> and --model <id>", "error");
-          return;
-        }
-        const run = configuredRun(cwd, epicId && model ? { epicId, model } : {});
+        const run = configuredRun(cwd);
         if (!run) {
-          ctx.ui.notify("conductor configuration missing run.epic and workers.model", "error");
+          ctx.ui.notify("conductor not configured; set run.epic and workers.model in .agents/conductor/config.json", "error");
           return;
         }
-        ctx.ui.notify(`conductor started: ${run.epicId} / ${run.model}`, "success");
+        ctx.ui.notify(`conductor starting: ${run.epicId} / ${run.model}`, "success");
         if (!startSupervisor(ctx, true, run)) void tick(ctx, true);
         return;
       }
-      if (verb === "status") {
+      if (verb === "status" || verb === "tick") {
         const run = configuredRun(cwd);
-        ctx.ui.notify(run ? `conductor configured: ${run.epicId} / ${run.model}` : "conductor not configured; set models.default and conductor.epic in .agents/config.json", run ? "info" : "warning");
+        if (!run) {
+          ctx.ui.notify("conductor not configured; set run.epic and workers.model in .agents/conductor/config.json", "warning");
+          return;
+        }
+        await tick(ctx, true);
         return;
       }
-      if (verb === "tick") { await tick(ctx, true); return; }
-      ctx.ui.notify("Usage: /conductor start [--epic <bead> --model <id>] | status | tick", "warning");
+      ctx.ui.notify("Usage: /conductor start | status | tick", "warning");
     },
   });
 }
