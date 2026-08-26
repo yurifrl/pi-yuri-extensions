@@ -13,19 +13,20 @@ type ToggleConfig = {
 };
 
 const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
-  yes: () => import("./modules/yes.ts"),
-  "copy-slack": () => import("./modules/copy-slack.ts"),
-  draft: () => import("./modules/draft.ts"),
-  "greetings": () => import("./modules/greetings.ts"),
-  "session-id": () => import("./modules/session-id.ts"),
-  aws: () => import("./modules/aws.ts"),
-  memwatch: () => import("./modules/memwatch.ts"),
-  helpy: () => import("./modules/helpy.ts"),
-  "pi-beads": () => import("./modules/pi-beads.ts"),
-  "git": () => import("./modules/git.ts"),
-  e: () => import("./modules/e.ts"),
-  envs: () => import("./modules/envs.ts"),
-  conductor: () => import("./modules/conductor.ts"),
+  yes: () => import("../modules/yes.ts"),
+  "copy-slack": () => import("../modules/copy-slack.ts"),
+  draft: () => import("../modules/draft.ts"),
+  greetings: () => import("../modules/greetings.ts"),
+  "session-id": () => import("../modules/session-id.ts"),
+  aws: () => import("../modules/aws.ts"),
+  memwatch: () => import("../modules/memwatch.ts"),
+  helpy: () => import("../modules/helpy.ts"),
+  "pi-beads": () => import("../modules/pi-beads.ts"),
+  git: () => import("../modules/git.ts"),
+  e: () => import("../modules/e.ts"),
+  envs: () => import("../modules/envs.ts"),
+  conductor: () => import("../modules/conductor.ts"),
+  checkpoint: () => import("../modules/checkpoint/pi.ts"),
 };
 
 const DEFAULT_CONFIG: ToggleConfig = {

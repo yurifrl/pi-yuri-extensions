@@ -7,6 +7,23 @@ Your personal **pi package hub**.
 - All toggles are **OFF by default**
 - Enable/disable modules in config: `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global)
 
+## Shared runtime architecture
+
+The package has one feature vocabulary across Pi and OMP: `checkpoint`, `envs`, `editor`, and `session-id`. The filesystem mirrors the integration boundary: `extensions/pi/` contains Pi-only entrypoints, `extensions/omp/` contains OMP-only entrypoints, and `extensions/modules/` owns reusable feature packages.
+
+Checkpoint is the model feature: `extensions/modules/checkpoint/core.ts` is runtime-neutral, `pi.ts` and `omp.ts` translate only their own runtime APIs, and `skills/checkpoint/SKILL.md` is the shared workflow. Pi loads `extensions/pi/index.ts`; OMP loads `extensions/omp/index.ts`.
+
+Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omitted modules use the defaults:
+
+```json
+{
+  "modules": {
+    "checkpoint": { "enabled": true },
+    "editor": { "enabled": false }
+  }
+}
+```
+
 ## Install
 
 ```bash
@@ -89,8 +106,8 @@ If you enable the `checkpoint` module, you also get:
 /checkpoint --compact
 ```
 
-`/checkpoint` is implemented by the extension as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`.
-It resolves the current Pi session from extension context (`ctx.sessionManager`) with a filesystem fallback, then sends a structured user message telling Pi to run the workflow from `~/.agents/skills/ag:checkpoint/SKILL.md` while injecting the real Pi session id as the change id and requiring session save/name/purpose output.
+`/checkpoint` is implemented by the extension as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`. Its adapter, implementation, and bundled `skills/checkpoint/SKILL.md` workflow live together in `extensions/modules/checkpoint/`; `checkpoint_prepare` resolves session metadata, a reusable checkpoint path, touched files, and runtime-specific resume metadata.
+
 
 If you enable the `e` module, you also get:
 
