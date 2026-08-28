@@ -1,4 +1,4 @@
-export const MODULE_NAMES = ["checkpoint", "envs", "editor", "session-id"] as const;
+export const MODULE_NAMES = ["checkpoint", "envs", "editor", "session-id", "working"] as const;
 
 export type ModuleName = (typeof MODULE_NAMES)[number];
 
@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: Required<YuriExtensionsConfig> = {
     envs: { enabled: true },
     editor: { enabled: true },
     "session-id": { enabled: true },
+    working: { enabled: true },
   },
 };
 

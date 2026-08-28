@@ -5,6 +5,7 @@ import checkpoint from "../modules/checkpoint/omp.ts";
 import editor from "./modules/editor.ts";
 import envs from "./modules/envs.ts";
 import sessionId from "./modules/session-id.ts";
+import working from "./modules/working.ts";
 
 type OmpModule = (pi: ExtensionAPI) => void;
 
@@ -13,6 +14,7 @@ const MODULES: Record<ModuleName, OmpModule> = {
   envs,
   editor,
   "session-id": sessionId,
+  working,
 };
 
 export default function yuriExtensions(pi: ExtensionAPI): void {
