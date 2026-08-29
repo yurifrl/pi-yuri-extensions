@@ -47,11 +47,11 @@ import {
   truncateToWidth,
   type EditorTheme,
 } from "@earendil-works/pi-tui";
-import { PI_YU_CONFIG_FILENAME } from "../config.ts";
+import { CONFIG_FILENAME } from "./lib/config.ts";
 
 const EXEC_TIMEOUT_MS = 8_000;
 const BD_RUN_TIMEOUT_MS = 30_000;
-const GLOBAL_TOGGLE_PATH = join(homedir(), ".pi", "agent", "extensions", PI_YU_CONFIG_FILENAME);
+const GLOBAL_TOGGLE_PATH = join(homedir(), ".pi", "agent", "extensions", CONFIG_FILENAME);
 
 // In-memory override so `/bd hook off` takes effect immediately. Initialised
 // from the on-disk config so a fresh session inherits the saved choice.

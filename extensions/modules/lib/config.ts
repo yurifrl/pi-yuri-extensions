@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 
-export const PI_YU_CONFIG_FILENAME = "pi-yuri-extensions.json";
+export const CONFIG_FILENAME = "pi-yuri-extensions.json";
 
 export type PiYuConfig = {
 	extensions?: Record<string, boolean>;
@@ -50,10 +50,10 @@ function uniquePaths(paths: string[]): string[] {
 export function getPiYuConfigCandidates(cwd: string): string[] {
 	const home = homedir();
 	return uniquePaths([
-		path.join(cwd, ".pi", "extensions", PI_YU_CONFIG_FILENAME),
-		path.join(home, ".pi", "agent", "extensions", PI_YU_CONFIG_FILENAME),
-		path.join(cwd, ".pi", PI_YU_CONFIG_FILENAME),
-		path.join(home, ".pi", PI_YU_CONFIG_FILENAME),
+		path.join(cwd, ".pi", "extensions", CONFIG_FILENAME),
+		path.join(home, ".pi", "agent", "extensions", CONFIG_FILENAME),
+		path.join(cwd, ".pi", CONFIG_FILENAME),
+		path.join(home, ".pi", CONFIG_FILENAME),
 	]);
 }
 
@@ -67,7 +67,7 @@ export async function resolvePiYuConfigPath(cwd: string): Promise<string> {
 		}
 	}
 
-	return path.join(homedir(), ".pi", "agent", "extensions", PI_YU_CONFIG_FILENAME);
+	return path.join(homedir(), ".pi", "agent", "extensions", CONFIG_FILENAME);
 }
 
 export async function readPiYuConfigFile(cwd: string): Promise<{ configPath: string; content?: string }> {

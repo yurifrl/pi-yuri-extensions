@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import os from "node:os";
 import path from "node:path";
-import { readPiYuConfigFile } from "../config.ts";
+import { readPiYuConfigFile } from "./lib/config.ts";
 const HELPY_CWD = path.join(os.homedir(), "DotFiles");
 
 type HelpyConfig = { thinking?: "off" | AiThinkingLevel };
