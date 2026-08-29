@@ -5,6 +5,10 @@ export type ModuleName = (typeof MODULE_NAMES)[number];
 export type ModuleConfig = {
   enabled?: boolean;
   checkpointsDirectory?: string;
+  /** working module: seconds of silence before the elapsed timer starts. */
+  graceSeconds?: number;
+  /** working module: seconds of silence before the label flips to "Still working…". */
+  stillAfterSeconds?: number;
 };
 
 export type YuriExtensionsConfig = {
