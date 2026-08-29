@@ -4,18 +4,19 @@ import { readOmpConfig } from "../config.ts";
 /**
  * Working indicator with elapsed timer.
  *
- * Spec: show NOTHING while the internal counter is under the grace
- * period. The counter resets on every new message (and steer/tool
- * activity). Only once silence exceeds graceSeconds does the indicator
- * show, with the real elapsed time (which starts at the grace value,
- * e.g. 0:10). The label flips to "Still working…" after stillAfterSeconds.
+ * Spec: during the grace period the row shows a STATIC "Working…"
+ * label — one frozen frame, no spinner animation, no counter. Only
+ * once silence exceeds graceSeconds does the counter appear, starting
+ * at the grace value (e.g. "Working… 0:10") and counting real elapsed
+ * time. The counter resets on every new message (and steer/tool
+ * activity). The label flips to "Still working…" after stillAfterSeconds.
  *
  * omp 18.0.10 draws the streaming indicator from its own state; the
  * extension-ui setWorkingVisible(false) call does not suppress it. The
  * two controls that DO work are setWorkingMessage (label swap) and
- * setWorkingIndicator (spinner frames, rendered verbatim). So hiding =
- * blank frames + blank message: the row is present but empty — no
- * spinner, no text, no timer. Past grace: restore real frames + label.
+ * setWorkingIndicator (spinner frames, rendered verbatim). Static
+ * label = single-element frames array (nothing to animate); counter =
+ * real frames + "Working… M:SS".
  *
  * The working message is PLAIN TEXT: the TUI wraps it with the theme
  * muted color; raw ANSI prints as literal junk.
@@ -26,7 +27,7 @@ import { readOmpConfig } from "../config.ts";
 
 const TICK_MS = 500;
 
-const HIDDEN_FRAMES = ["", " "];
+const STATIC_FRAME = ["󱊷"];
 const WORKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function formatDuration(ms: number): string {
@@ -67,30 +68,22 @@ export default function working(pi: ExtensionAPI): void {
 		if (debug) log(`${event} reset (active=${active})`);
 	}
 
-	function hide(): void {
-		ui?.setWorkingIndicator?.({ frames: HIDDEN_FRAMES });
-		ui?.setWorkingMessage?.("");
-	}
-
-	function show(since: number): void {
-		ui?.setWorkingIndicator?.({ frames: WORKING_FRAMES });
-		const label = since >= stillAfterMs ? "Still working…" : "Working…";
-		ui?.setWorkingMessage?.(`${label} ${formatDuration(since)}`);
-	}
-
 	function render(): void {
 		if (!active || !ui) return;
 		const since = Date.now() - lastMessageAt;
 		if (since < graceMs) {
-			hide();
+			// Static label: frozen frame, no counter.
+			ui.setWorkingIndicator?.({ frames: STATIC_FRAME });
+			ui.setWorkingMessage?.("Working…");
 			return;
 		}
-		show(since);
+		ui.setWorkingIndicator?.({ frames: WORKING_FRAMES });
+		const label = since >= stillAfterMs ? "Still working…" : "Working…";
+		ui.setWorkingMessage?.(`${label} ${formatDuration(since)}`);
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		ui = ctx.ui;
-		hide(); // stock indicator starts visible; blank it immediately
 		ctx.setInterval(render, TICK_MS);
 	});
 
