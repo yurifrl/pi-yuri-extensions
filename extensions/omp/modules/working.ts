@@ -5,11 +5,6 @@ import type { ModuleConfig } from "../../modules/config.ts";
 /**
  * Working indicator with elapsed timer.
  *
- * Message is PLAIN TEXT: the TUI Loader wraps it with the theme's muted
- * color, so ANSI escapes in the message end up rendered as literal junk
- * (e.g. "[32m"). Don't add any.
- *
- * Behavior (all measured from the last activity event):
  *   0 .. graceSeconds        → "Working…" (no timer yet)
  *   graceSeconds .. still    → "Working… M:SS" (counts from grace elapsed)
  *   >= stillAfterSeconds     → "Still working… M:SS"
@@ -35,7 +30,7 @@ interface WorkingUI {
 	setWorkingMessage?(message?: string): void;
 }
 
-function resolveSettings(): Required<Pick<ModuleConfig, "graceSeconds" | "stillAfterSeconds">> {
+function resolveSettings(): { graceSeconds: number; stillAfterSeconds: number; debug: boolean } {
 	const module = readOmpConfig().modules?.working ?? {};
 	const graceSeconds = module.graceSeconds ?? 10;
 	const stillAfterSeconds = module.stillAfterSeconds ?? graceSeconds + 15;
@@ -43,19 +38,23 @@ function resolveSettings(): Required<Pick<ModuleConfig, "graceSeconds" | "stillA
 		graceSeconds,
 		// "Still working…" must land after the grace period, else clamp.
 		stillAfterSeconds: Math.max(stillAfterSeconds, graceSeconds + 1),
+		debug: module.debug ?? false,
 	};
 }
 
 export default function working(pi: ExtensionAPI): void {
-	const { graceSeconds, stillAfterSeconds } = resolveSettings();
+	const { graceSeconds, stillAfterSeconds, debug } = resolveSettings();
 	const graceMs = graceSeconds * 1000;
 	const stillAfterMs = stillAfterSeconds * 1000;
+	const log = (msg: string) => pi.logger?.debug?.(`[working] ${msg}`);
 
 	let active = false;
 	let lastActivityAt = Date.now();
+	if (debug) log(`init grace=${graceSeconds}s stillAfter=${stillAfterSeconds}s`);
 
-	function markActivity(): void {
+	function markActivity(event: string): void {
 		lastActivityAt = Date.now();
+		if (debug) log(`${event} reset (active=${active})`);
 	}
 
 	function render(ui: WorkingUI): void {
@@ -76,18 +75,25 @@ export default function working(pi: ExtensionAPI): void {
 	});
 
 	// A run is active from agent start until agent end (steers keep the same run).
-	pi.on("agent_start", markActivity);
-	pi.on("turn_start", markActivity);
+	pi.on("agent_start", () => {
+		active = true;
+		markActivity("agent_start");
+	});
+	pi.on("turn_start", () => {
+		active = true;
+		markActivity("turn_start");
+	});
 
 	// Every streamed message, tool exchange, and steer resets the timer.
-	pi.on("message_start", markActivity);
-	pi.on("message_update", markActivity);
-	pi.on("message_end", markActivity);
-	pi.on("tool_call", markActivity);
-	pi.on("tool_result", markActivity);
-	pi.on("input", markActivity);
+	pi.on("message_start", () => markActivity("message_start"));
+	pi.on("message_update", () => markActivity("message_update"));
+	pi.on("message_end", () => markActivity("message_end"));
+	pi.on("tool_call", () => markActivity("tool_call"));
+	pi.on("tool_result", () => markActivity("tool_result"));
+	pi.on("input", () => markActivity("input"));
 
 	pi.on("agent_end", async (_event, ctx) => {
+		if (debug) log("agent_end clear");
 		active = false;
 		ctx.ui.setWorkingMessage?.();
 	});

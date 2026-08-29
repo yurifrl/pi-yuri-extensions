@@ -9,6 +9,8 @@ export type ModuleConfig = {
   graceSeconds?: number;
   /** working module: seconds of silence before the label flips to "Still working…". */
   stillAfterSeconds?: number;
+  /** working module: log event/timer diagnostics to the omp log. */
+  debug?: boolean;
 };
 
 export type YuriExtensionsConfig = {
