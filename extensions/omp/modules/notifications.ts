@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { push } from "../../../modules/lib/cmuxNotify.ts";
-import { DEFAULT_CONFIG, type YuriExtensionsConfig } from "../../../modules/config.ts";
+import { push } from "../../modules/lib/cmuxNotify.ts";
+import { DEFAULT_CONFIG, type YuriExtensionsConfig } from "../../modules/config.ts";
 import { CONFIG_PATH, readOmpConfig, writeOmpConfig } from "../config.ts";
 
 /**
