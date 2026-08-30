@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-08-29 OMP: nudge + notifications from pi-fbr-extensions
+
+### Added
+- `extensions/omp/modules/nudge.ts` — top-level `/nudge`: interrupt a stalled run and resend `continue` (ported from discontinued `pi-fbr-extensions`).
+- `extensions/omp/modules/notifications.ts` — cmux banners for guardrails prompt/blocked/risk (yolo-gated), AskUserQuestion, run errors, and tool errors; `/notifications` toggle UI; per-event state persisted under `modules.notifications.events` in `~/.omp/agent/extensions/pi-yuri-extensions.json`.
+- `nudge` and `notifications` registered in the OMP loader (`extensions/omp/index.ts`) and added to `MODULE_NAMES`/defaults in `extensions/modules/config.ts`.
+- `writeOmpConfig`/`CONFIG_PATH` exports in `extensions/omp/config.ts`; `isModuleEnabled` hardened against missing module entries.
+
+### Notes
+- `working` was already present on the OMP side as the placeholder module — no copy needed.
+- Nudge removed from `@fbr/toolkit` 0.2.0 (dedupe: one owner per command).
+
 ## 2026-07-05 Vim File Opener Extension
 - Session ID: f8a7b3c1-5e4f-4a2d-9b8e-6c3a7d9f1e2b
 - Session File: /Users/yuri/.pi/agent/sessions/--Users-yuri-DotFiles--/2026-07-05T10-00-00-000Z_f8a7b3c1-5e4f-4a2d-9b8e-6c3a7d9f1e2b.jsonl

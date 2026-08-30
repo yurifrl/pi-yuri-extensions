@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { DEFAULT_CONFIG, type YuriExtensionsConfig } from "../modules/config.ts";
 
-const CONFIG_PATH = path.join(homedir(), ".omp", "agent", "extensions", "pi-yuri-extensions.json");
+export const CONFIG_PATH = path.join(homedir(), ".omp", "agent", "extensions", "pi-yuri-extensions.json");
 
 export function readOmpConfig(): YuriExtensionsConfig {
   if (!existsSync(CONFIG_PATH)) return DEFAULT_CONFIG;
@@ -19,4 +19,10 @@ export function readOmpConfig(): YuriExtensionsConfig {
   } catch {
     return DEFAULT_CONFIG;
   }
+}
+
+/** Persist the full config (modules incl. per-module extras like notifications.events). */
+export function writeOmpConfig(filePath: string, config: YuriExtensionsConfig): void {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
