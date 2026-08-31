@@ -2,10 +2,9 @@
 
 Your personal **pi package hub**.
 
-- Main extension name: **pi-yuri-extensions**
-- All bundled extensions are **toggleable**
-- All toggles are **OFF by default**
-- Enable/disable modules in config: `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global)
+- Pi-side modules are **toggleable**, OFF by default; OMP-side modules are ON by default
+- Pi config: `.pi/extensions/pi-yuri-extensions.json` (project) or `~/.pi/agent/extensions/pi-yuri-extensions.json` (global) — `extensions` map
+- OMP config: `~/.omp/agent/extensions/pi-yuri-extensions.json` — `modules` map
 
 ## Shared runtime architecture
 
@@ -60,9 +59,7 @@ pi install .
 
 (or `pi install -l .` for project-local settings)
 
-## How toggles work
-
-Only `extensions/pi-yuri-extensions.ts` is auto-loaded by pi.
+Pi auto-loads the package entrypoint (registered in `~/.pi/agent/settings.jsonc` → `packages`), which reads the config and dynamically imports each enabled module from `extensions/pi/index.ts`.
 
 On `session_start`, `pi-yuri-extensions` reads config from:
 
@@ -125,42 +122,55 @@ It prints current toggle status and config path.
 
 OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`.
 
-Enable the `what` module in `.pi/extensions/pi-yuri-extensions.json` (or `~/.pi/agent/extensions/pi-yuri-extensions.json` globally), then use:
+### `checkpoint` (Pi + OMP)
 
-```bash
-/what
-/what 3
-```
-
-`/what` is a deterministic extension command. It does not call the LLM.
-
-- `/what` opens a Pi prompt browser UI with numbered, truncated previews
-- `/what <number>` opens that full prompt directly from the current session history
-
-If you enable the `checkpoint` module, you also get:
+Enable the `checkpoint` module, then:
 
 ```bash
 /checkpoint
 /checkpoint --compact
 ```
 
-`/checkpoint` is implemented by the extension as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`. Its adapter, implementation, and bundled `skills/checkpoint/SKILL.md` workflow live together in `extensions/modules/checkpoint/`; `checkpoint_prepare` resolves session metadata, a reusable checkpoint path, touched files, and runtime-specific resume metadata.
+Implemented as a Pi-native launcher, so it does not depend on shell-only variables like `$PPID`. Its adapter, implementation, and bundled `skills/checkpoint/SKILL.md` workflow live together in `extensions/modules/checkpoint/`; `checkpoint_prepare` resolves session metadata, a reusable checkpoint path, touched files, and runtime-specific resume metadata.
 
-
-If you enable the `e` module, you also get:
+### `e` (Pi)
 
 ```bash
 /e [filepath]
 ```
 
-`/e` opens a file in Neovim, similar to vim's `/e` command:
+Opens a file in Neovim, similar to vim's `/e` command:
 
-- `/e filepath` - Opens the specified file
-- `/e .` - Opens the current directory
-- `/e` - Opens the current directory (default)
-- `/e @filepath` - Opens the specified file (same as `filepath`, `@` prefix is optional)
+- `/e filepath` — opens the specified file
+- `/e .` — opens the current directory
+- `/e` — opens the current directory (default)
+- `/e @filepath` — same as `filepath`, `@` prefix is optional
 
 Supports absolute paths, relative paths, and current directory opening.
+
+### `envs` (OMP)
+
+```bash
+/envs work|personal|all|status
+```
+
+Applies `WORK_`/`PERSONAL_`/`ALL_`-prefixed environment variables (stripping the prefix) plus `GENERAL_*` always. `status` shows the active profile and applied variable count.
+
+### `nudge` (OMP)
+
+```bash
+/nudge
+```
+
+Interrupts a stalled run and queues `continue`.
+
+### `notifications` (OMP)
+
+```bash
+/notifications [<id> on|off | all on|off | test <id>]
+```
+
+Bare opens an interactive per-event picker. Fires cmux banners for guardrails prompts/blocks (yolo-gated for risk), AskUserQuestion, run errors, and tool errors.
 
 ## Notes
 
