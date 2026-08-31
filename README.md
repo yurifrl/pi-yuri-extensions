@@ -19,10 +19,37 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 {
   "modules": {
     "checkpoint": { "enabled": true },
-    "editor": { "enabled": false }
+    "editor": { "enabled": true },
+    "envs": { "enabled": true },
+    "session-id": { "enabled": true },
+    "working": { "enabled": true, "graceSeconds": 10, "stillAfterSeconds": 45, "debug": false },
+    "nudge": { "enabled": true },
+    "notifications": {
+      "enabled": true,
+      "events": {
+        "promptedInput": true,
+        "dangerousCommand": false,
+        "blockedCommand": false,
+        "question": true,
+        "agentError": false,
+        "toolError": false
+      }
+    }
   }
 }
 ```
+
+### OMP module options
+
+| Module | Key | Default | Meaning |
+| --- | --- | --- | --- |
+| all | `enabled` | `true` | Master toggle for the module. |
+| `working` | `graceSeconds` | `10` | Seconds of silence before the elapsed timer starts. |
+| `working` | `stillAfterSeconds` | `45` | Seconds of silence before the label flips to "Still working…". |
+| `working` | `debug` | `false` | Log event/timer diagnostics to the omp log. |
+| `notifications` | `events.<id>` | per event | Per-event banner on/off. Event ids: `promptedInput`, `dangerousCommand` (yolo only), `blockedCommand`, `question`, `agentError`, `toolError`. |
+
+`nudge`, `envs`, `editor`, and `session-id` take no options. `envs` profile switching is runtime-only via `/envs work|personal|all|status`.
 
 ## Install
 
@@ -59,23 +86,32 @@ Example:
 }
 ```
 
-Any omitted key defaults to `false`.
 
 ## Available module keys
 
-- `checkpoint`
-- `cross-agent`
-- `e`
-- `greetings`
-- `git`
-- `memwatch`
-- `pi-beads`
+Pi-side toggles (`extensions` map, all OFF by default):
+
 - `aws`
+- `checkpoint`
 - `copy-slack`
 - `draft`
-- `session-id`
+- `e`
+- `git`
+- `greetings`
 - `helpy`
+- `memwatch`
+- `session-id`
 - `yes`
+
+OMP-side modules (`modules` map, all ON by default):
+
+- `checkpoint`
+- `editor`
+- `envs`
+- `nudge`
+- `notifications`
+- `session-id`
+- `working`
 
 ## Commands
 
@@ -86,6 +122,8 @@ Use:
 ```
 
 It prints current toggle status and config path.
+
+OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`.
 
 Enable the `what` module in `.pi/extensions/pi-yuri-extensions.json` (or `~/.pi/agent/extensions/pi-yuri-extensions.json` globally), then use:
 
