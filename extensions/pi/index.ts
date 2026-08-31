@@ -20,6 +20,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   "session-id": () => import("../modules/session-id.ts"),
   aws: () => import("../modules/aws.ts"),
   memwatch: () => import("../modules/memwatch.ts"),
+  save: () => import("../modules/save.ts"),
   helpy: () => import("../modules/helpy.ts"),
   "pi-beads": () => import("../modules/pi-beads.ts"),
   git: () => import("../modules/git.ts"),

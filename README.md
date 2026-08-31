@@ -20,7 +20,7 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
     "checkpoint": { "enabled": true },
     "editor": { "enabled": true },
     "envs": { "enabled": true },
-    "session-id": { "enabled": true },
+    "save": { "enabled": true },
     "working": { "enabled": true, "graceSeconds": 10, "stillAfterSeconds": 45, "debug": false },
     "nudge": { "enabled": true },
     "notifications": {
@@ -107,6 +107,7 @@ OMP-side modules (`modules` map, all ON by default):
 - `envs`
 - `nudge`
 - `notifications`
+- `save`
 - `session-id`
 - `working`
 
@@ -120,7 +121,7 @@ Use:
 
 It prints current toggle status and config path.
 
-OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`.
+OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`.
 
 ### `checkpoint` (Pi + OMP)
 
@@ -163,6 +164,21 @@ Applies `WORK_`/`PERSONAL_`/`ALL_`-prefixed environment variables (stripping the
 ```
 
 Interrupts a stalled run and queues `continue`.
+
+### `save` (Pi + OMP)
+
+```bash
+/save [name] [description="..."]
+```
+
+Registers the current session with `cly agent-session` (`cly as save`). Prefills
+the session id from the runtime session manager (with a filesystem fallback) and
+uses the session summary as the name. Positional text overrides the name;
+`description="..."` overrides the description. Fully handled by the extension —
+it never sends a message to the agent.
+
+Also applies `$CLY_SESSION_NAME` (set by `cly pi -n NAME`) as the session display
+name on `session_start` when it differs from the current name.
 
 ### `notifications` (OMP)
 

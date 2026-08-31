@@ -6,6 +6,7 @@ import editor from "./modules/editor.ts";
 import envs from "./modules/envs.ts";
 import nudge from "./modules/nudge.ts";
 import notifications from "./modules/notifications.ts";
+import save from "../modules/save.ts";
 import sessionId from "./modules/session-id.ts";
 import working from "./modules/working.ts";
 
@@ -13,8 +14,9 @@ type OmpModule = (pi: ExtensionAPI) => void;
 
 const MODULES: Record<ModuleName, OmpModule> = {
   checkpoint,
-  editor,
   envs,
+  editor,
+  save,
   "session-id": sessionId,
   working,
   nudge,
