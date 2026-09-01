@@ -1,10 +1,32 @@
-import { DynamicBorder, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { Container, Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { spawn } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readPiYuConfig } from "./lib/config.ts";
+import { readOmpAwsLogin } from "../omp/awsLoginConfig.ts";
+
+/**
+ * awsLogin config resolution:
+ *   Pi side — `awsLogin` block in pi-yuri-extensions.json (existing behavior).
+ *   OMP side — `modules.aws` block in ~/.omp/agent/extensions/pi-yuri-extensions.json,
+ *              falling back to the pi global config's `awsLogin` block.
+ */
+async function loadAwsLogin(cwd: string): Promise<AwsLoginConfig> {
+  const { config } = await readPiYuConfig(cwd);
+  const fromPi = config.awsLogin;
+  if (fromPi && (fromPi.profiles?.length ?? 0) > 0) return fromPi;
+  return readOmpAwsLogin() ?? fromPi ?? {};
+}
+
+type AwsLoginConfig = {
+  profiles?: string[];
+  chromeProfiles?: Record<string, string>;
+  defaultChromeProfile?: string;
+  browserApp?: string;
+};
+
 
 type State = "pending" | "focus" | "running" | "ok" | "error";
 type Row = { profile: string; chrome?: string; state: State; detail?: string; elapsedMs?: number };
@@ -39,9 +61,7 @@ export default function (pi: ExtensionAPI) {
       },
     ],
     handler: async (args, ctx) => {
-      const cwd = typeof ctx.cwd === "function" ? ctx.cwd() : ctx.cwd ?? process.cwd();
-      const { config } = await readPiYuConfig(cwd);
-      const awsCfg = config.awsLogin ?? {};
+      const awsCfg = await loadAwsLogin(ctx.cwd ?? process.cwd());
 
       const raw = (args ?? "").trim();
       const parts = raw.split(/\s+/).filter(Boolean);
@@ -75,16 +95,14 @@ export default function (pi: ExtensionAPI) {
         WIDGET_KEY,
         (_tui, theme) => {
           const container = new Container();
-          const borderFn = (s: string) => theme.fg("dim", s);
-          container.addChild(new DynamicBorder(borderFn));
           const header = new Text("", 1, 0);
           const body = new Text("", 1, 0);
           container.addChild(header);
           container.addChild(body);
-          container.addChild(new DynamicBorder(borderFn));
 
           return {
             render(width: number): string[] {
+              const rule = theme.fg("dim", "─".repeat(Math.max(width, 4)));
               const title =
                 theme.fg("accent", "☁ AWS Login  ") +
                 theme.fg("dim", `· ${browserApp}`);
@@ -102,7 +120,7 @@ export default function (pi: ExtensionAPI) {
               });
               body.setText(lines.join("\n"));
 
-              return container.render(width);
+              return [rule, ...container.render(width), rule];
             },
             invalidate() {
               container.invalidate();
@@ -112,7 +130,7 @@ export default function (pi: ExtensionAPI) {
         { placement: "belowEditor" },
       );
 
-      const refresh = () => { ctx.ui.invalidate?.(); };
+      const refresh = () => { (ctx.ui as { requestRender?: () => void }).requestRender?.(); };
       const errors: string[] = [];
       const ok: string[] = [];
 
@@ -150,7 +168,7 @@ export default function (pi: ExtensionAPI) {
           "error",
         );
       } else {
-        ctx.ui.notify(`✅ AWS SSO login: ${ok.join(", ")}`, "success");
+        ctx.ui.notify(`✅ AWS SSO login: ${ok.join(", ")}`, "info");
       }
     },
   });

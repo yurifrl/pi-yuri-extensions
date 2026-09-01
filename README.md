@@ -43,6 +43,7 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 | Module | Key | Default | Meaning |
 | --- | --- | --- | --- |
 | all | `enabled` | `true` | Master toggle for the module. |
+| `aws` | (block) | — | `modules.aws` accepts the same fields as the pi-side `awsLogin` block (`profiles`, `chromeProfiles`, `defaultChromeProfile`, `browserApp`); falls back to the pi global config's `awsLogin` block. |
 | `working` | `graceSeconds` | `10` | Seconds of silence before the elapsed timer starts. |
 | `working` | `stillAfterSeconds` | `45` | Seconds of silence before the label flips to "Still working…". |
 | `working` | `debug` | `false` | Log event/timer diagnostics to the omp log. |
@@ -102,7 +103,7 @@ Pi-side toggles (`extensions` map, all OFF by default):
 
 OMP-side modules (`modules` map, all ON by default):
 
-- `checkpoint`
+- `aws`
 - `editor`
 - `envs`
 - `nudge`
@@ -121,7 +122,7 @@ Use:
 
 It prints current toggle status and config path.
 
-OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`.
+OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`, `/aws`.
 
 ### `checkpoint` (Pi + OMP)
 
