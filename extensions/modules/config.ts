@@ -1,4 +1,27 @@
-export const MODULE_NAMES = ["checkpoint", "envs", "editor", "save", "session-id", "working", "nudge", "notifications"] as const;
+export const MODULE_NAMES = [
+  "checkpoint",
+  "envs",
+  "editor",
+  "save",
+  "session-id",
+  "working",
+  "nudge",
+  "notifications",
+  "aws",
+  "budget",
+  "coderabbit",
+  "continue",
+  "ctx",
+  "exit",
+  "handoff",
+  "queue",
+  "quick",
+  "respond",
+  "statusline",
+  "thinking",
+  "update",
+  "toolkit",
+] as const;
 
 export type ModuleName = (typeof MODULE_NAMES)[number];
 
@@ -15,11 +38,46 @@ export type ModuleConfig = {
   events?: Record<string, boolean>;
 };
 
+export const STATUSLINE_SEGMENT_NAMES = ["contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
+export const STATUSLINE_COLORS = [
+  "accent",
+  "success",
+  "warning",
+  "error",
+  "statusLineContext",
+  "statusLineSpend",
+  "statusLineCost",
+] as const;
+
+export const STATUSLINE_DEFAULT_SEGMENTS: StatuslineSegment[] = [
+  { name: "contextLimit" },
+  { name: "budget", color: "statusLineSpend" },
+  { name: "sessionCost" },
+  { name: "aws", color: "warning" },
+  { name: "kube", color: "success" },
+];
+
+/** Toolkit top-level fields (see omp/modules/toolkit/). */
+export interface StatuslineSegment {
+  name: (typeof STATUSLINE_SEGMENT_NAMES)[number];
+  color?: (typeof STATUSLINE_COLORS)[number];
+  /** false hides the segment from the footer. */
+  enabled?: boolean;
+}
+
 export type YuriExtensionsConfig = {
   modules?: Partial<Record<ModuleName, ModuleConfig>>;
+  /** budget module: USD spend gates persisted globally. */
+  budgetGates?: number[];
+  /** ctx module: artificial context cap in tokens. */
+  ctxLimit?: number;
+  /** ctx module: what happens at the cap. */
+  ctxLimitAction?: "compact" | "stop";
+  /** continue module: prompt re-sent after automatic maintenance compaction. */
+  continueAfterCompactPrompt?: string;
+  statusline?: { segments?: StatuslineSegment[] };
 };
-
-export const DEFAULT_CONFIG: Required<YuriExtensionsConfig> = {
+export const DEFAULT_CONFIG: Required<Pick<YuriExtensionsConfig, "modules">> & Partial<YuriExtensionsConfig> = {
   modules: {
     checkpoint: { enabled: true },
     envs: { enabled: true },
@@ -28,6 +86,19 @@ export const DEFAULT_CONFIG: Required<YuriExtensionsConfig> = {
     working: { enabled: true },
     nudge: { enabled: true },
     notifications: { enabled: true },
+    aws: { enabled: true },
+    budget: { enabled: true },
+    coderabbit: { enabled: true },
+    continue: { enabled: true },
+    ctx: { enabled: true },
+    exit: { enabled: true },
+    handoff: { enabled: true },
+    queue: { enabled: true },
+    quick: { enabled: true },
+    respond: { enabled: true },
+    statusline: { enabled: true },
+    thinking: { enabled: true },
+    update: { enabled: true },
     save: { enabled: true },
   },
 };

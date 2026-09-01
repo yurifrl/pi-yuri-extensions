@@ -10,11 +10,17 @@ export function readOmpConfig(): YuriExtensionsConfig {
   try {
     const parsed: unknown = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
     if (typeof parsed !== "object" || parsed === null || !("modules" in parsed) || typeof parsed.modules !== "object" || parsed.modules === null) return DEFAULT_CONFIG;
+    const raw = parsed as Record<string, unknown>;
     return {
       modules: {
         ...DEFAULT_CONFIG.modules,
-        ...parsed.modules,
+        ...(raw.modules as Record<string, unknown>),
       },
+      budgetGates: raw.budgetGates as number[] | undefined,
+      ctxLimit: raw.ctxLimit as number | undefined,
+      ctxLimitAction: raw.ctxLimitAction as "compact" | "stop" | undefined,
+      continueAfterCompactPrompt: raw.continueAfterCompactPrompt as string | undefined,
+      statusline: raw.statusline as YuriExtensionsConfig["statusline"],
     };
   } catch {
     return DEFAULT_CONFIG;

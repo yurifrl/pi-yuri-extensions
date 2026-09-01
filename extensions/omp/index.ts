@@ -10,10 +10,11 @@ import notifications from "./modules/notifications.ts";
 import save from "../modules/save.ts";
 import sessionId from "./modules/session-id.ts";
 import working from "./modules/working.ts";
+import toolkit from "./modules/toolkit/index.ts";
 
 type OmpModule = (pi: ExtensionAPI) => void;
 
-const MODULES: Record<ModuleName, OmpModule> = {
+const MODULES: Partial<Record<ModuleName, OmpModule>> = {
   aws,
   checkpoint,
   envs,
@@ -23,11 +24,13 @@ const MODULES: Record<ModuleName, OmpModule> = {
   working,
   nudge,
   notifications,
+  toolkit,
 };
 
 export default function yuriExtensions(pi: ExtensionAPI): void {
   const config = readOmpConfig();
   for (const name of Object.keys(MODULES) as ModuleName[]) {
-    if (isModuleEnabled(config, name)) MODULES[name](pi);
+    const register = MODULES[name];
+    if (register && isModuleEnabled(config, name)) register(pi);
   }
 }

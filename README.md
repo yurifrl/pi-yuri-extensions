@@ -33,7 +33,21 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
         "agentError": false,
         "toolError": false
       }
-    }
+    },
+    "toolkit": { "enabled": true },
+    "budget": { "enabled": true },
+    "ctx": { "enabled": true }
+  },
+  "ctxLimit": 200000,
+  "ctxLimitAction": "compact",
+  "statusline": {
+    "segments": [
+      { "name": "contextLimit" },
+      { "name": "budget", "color": "statusLineSpend" },
+      { "name": "sessionCost", "color": "accent" },
+      { "name": "aws", "color": "warning" },
+      { "name": "kube", "color": "success" }
+    ]
   }
 }
 ```
@@ -48,6 +62,12 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 | `working` | `stillAfterSeconds` | `45` | Seconds of silence before the label flips to "Still working…". |
 | `working` | `debug` | `false` | Log event/timer diagnostics to the omp log. |
 | `notifications` | `events.<id>` | per event | Per-event banner on/off. Event ids: `promptedInput`, `dangerousCommand` (yolo only), `blockedCommand`, `question`, `agentError`, `toolError`. |
+| `toolkit` | (bundle) | `true` | The whole toolkit bundle from `extensions/omp/modules/toolkit/` (ported from `@fbr/toolkit`). Individual modules gate via their own keys: `budget`, `coderabbit`, `continue`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `statusline`, `thinking`, `update`. |
+| `budgetGates` | `[]` | Toolkit top-level: USD spend gates applied to every session; set via `/budget`. |
+| `ctxLimit` / `ctxLimitAction` | unset / `compact` | Toolkit top-level: artificial context cap and the action at the cap; set via `/ctx`. |
+| `continueAfterCompactPrompt` | built-in | Toolkit top-level: prompt re-sent after automatic maintenance compaction. |
+| `statusline.segments` | all five | Toolkit top-level: status widget segments, colors, and order. |
+
 
 `nudge`, `envs`, `editor`, and `session-id` take no options. `envs` profile switching is runtime-only via `/envs work|personal|all|status`.
 
@@ -104,6 +124,7 @@ Pi-side toggles (`extensions` map, all OFF by default):
 OMP-side modules (`modules` map, all ON by default):
 
 - `aws`
+- `checkpoint`
 - `editor`
 - `envs`
 - `nudge`
@@ -111,6 +132,7 @@ OMP-side modules (`modules` map, all ON by default):
 - `save`
 - `session-id`
 - `working`
+- `toolkit` (and its sub-keys `budget`, `coderabbit`, `continue`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `statusline`, `thinking`, `update`)
 
 ## Commands
 
@@ -122,7 +144,7 @@ Use:
 
 It prints current toggle status and config path.
 
-OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`, `/aws`.
+OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`, `/aws`, plus the toolkit set — `/budget`, `/ctx`, `/handoff`, `/thinking`, `/queue` (`/q`), `/queue-manager` (`/qm`), `/quick-oppus` (`/qo`), `/quick-gpt` (`/qg`), `/respond`, `/coderabbit`, `/update` — and the model-callable `exit` tool.
 
 ### `checkpoint` (Pi + OMP)
 

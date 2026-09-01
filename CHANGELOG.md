@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-01 OMP: port @fbr/toolkit into pi-yuri-extensions
+
+### Added
+- `extensions/omp/modules/toolkit/` — the full `@fbr/toolkit` plugin ported from the omp-marketplace repo (budget, coderabbit, continue, ctx, exit, handoff, queue, quick, respond, statusline, statusline-view, thinking, update) plus `coderabbit.test.ts` and the module entry `index.ts`.
+- `extensions/omp/modules/toolkit/config.ts` — adapter keeping the original toolkit config surface (`loadConfig`/`saveConfig`/`bootstrapConfig`, `MODULE_KEYS`, statusline constants) but backed by the shared YuriExtensionsConfig store, so `toolkit.json` is gone.
+- Toolkit top-level fields on `YuriExtensionsConfig` (`budgetGates`, `ctxLimit`, `ctxLimitAction`, `continueAfterCompactPrompt`, `statusline`) with statusline constants/types in `extensions/modules/config.ts`; `readOmpConfig` passes them through.
+- `toolkit` module registered in the OMP loader; per-module toggles still work via `modules.<key>.enabled`.
+- `tsconfig.json` + `@types/node` dev dep for `bunx tsc -p tsconfig.json` typechecking.
+
+### Changed
+- User config: `~/.omp/agent/extensions/toolkit.json` merged into `~/.omp/agent/extensions/pi-yuri-extensions.json` (top-level `ctxLimit`, `ctxLimitAction`, `statusline`; module keys into `modules`); toolkit.json and legacy `~/.omp/agent/fbr-toolkit.json` removed.
+
+### Notes
+- Source marketplace plugin left untouched on its feature branch; upstream can keep or drop it independently.
+
 ## 2026-08-29 OMP: nudge + notifications from pi-fbr-extensions
 
 ### Added
