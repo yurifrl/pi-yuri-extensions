@@ -9,6 +9,7 @@ const STALE_DIR = `${PLUGIN_DIR}/.node_modules.trash`;
 type UpdateStep = {
 	label: string;
 	run: string;
+	args: string[];
 };
 
 /**
@@ -22,13 +23,13 @@ type UpdateStep = {
  * invocations are refused). Disable: "modules": { "update": false }.
  */
 const UPDATE_STEPS: UpdateStep[] = [
-	{ label: "OMP plugins", run: "omp update --plugins" },
-	{ label: "OMP", run: "omp update" },
+	{ label: "OMP plugins", run: "omp", args: ["update", "--plugins"] },
+	{ label: "OMP", run: "omp", args: ["update"] },
 ];
 
 const PRUNE_STEPS: UpdateStep[] = [
-	{ label: "clean", run: `mv -f node_modules .node_modules.trash 2>/dev/null; true` },
-	{ label: "install", run: "bun install" },
+	{ label: "clean", run: "sh", args: ["-c", "mv -f node_modules .node_modules.trash 2>/dev/null; true"] },
+	{ label: "install", run: "bun", args: ["install"] },
 ];
 
 export default function update(pi: ExtensionAPI): void {
@@ -70,7 +71,7 @@ async function runSteps(pi: ExtensionAPI, prune: boolean, steps: UpdateStep[], c
 		c.ui.setStatus(STATUS_KEY, `⏳ ${step.label}… (${i + 1}/${steps.length})`);
 
 		try {
-			const result = await pi.exec(step.run, [], { cwd: PLUGIN_DIR, timeout: 600_000 });
+			const result = await pi.exec(step.run, step.args, { cwd: PLUGIN_DIR, timeout: 600_000 });
 			if (result.code !== 0) {
 				const msg = (result.stderr || result.stdout || "").trim();
 				errors.push(`${step.label} failed (exit ${result.code}): ${msg}`);
