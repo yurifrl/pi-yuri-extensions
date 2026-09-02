@@ -9,7 +9,7 @@
  * Rendering lives in statusline-view.ts; segments/order/colors configure via pi-yuri-extensions.json. Requires AIHUB_API_KEY for
  * the budget segment. Disable: "modules": { "statusline": false }.
  */
-import { truncateToWidth } from "@oh-my-pi/pi-tui";
+import { truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, type ToolkitConfig } from "./config.ts";
 import { renderStatusline, type StatuslineBudget } from "./statusline-view.ts";
@@ -118,18 +118,21 @@ export default function statusline(pi: ExtensionAPI): void {
 					render(width: number): string[] {
 						const active = latestCtx;
 						if (!active) return [];
-						const line = renderStatusline(
-							configCache(),
-							{
-								contextTokens: active.getContextUsage()?.tokens,
-								budget: state.budget,
-								cost: sessionCostText(active),
-								aws: state.aws,
-								kube: state.kube,
-							},
-							theme,
+						const line = truncateToWidth(
+							renderStatusline(
+								configCache(),
+								{
+									contextTokens: active.getContextUsage()?.tokens,
+									budget: state.budget,
+									cost: sessionCostText(active),
+									aws: state.aws,
+									kube: state.kube,
+								},
+								theme,
+							),
+							width,
 						);
-						return [truncateToWidth(line, width)];
+						return [" ".repeat(Math.max(0, width - visibleWidth(line))) + line];
 					},
 				};
 			},
