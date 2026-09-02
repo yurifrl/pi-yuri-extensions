@@ -85,10 +85,10 @@ export default function statusline(pi: ExtensionAPI): void {
 	let cachedConfig: ToolkitConfig | undefined;
 	const configCache = (): ToolkitConfig => (cachedConfig ??= loadConfig(pi.pi.settings.getAgentDir()));
 
-	function sessionCostText(ctx: ExtensionContext): string | undefined {
+	function sessionCostText(ctx: ExtensionContext): string {
 		const spend = sessionSpend(ctx, state.prices);
-		if (spend.total <= 0) return undefined;
-		return `󰔛 $${spend.total < 0.01 ? spend.total.toFixed(4) : spend.total.toFixed(2)} · ~$${spend.total / spend.messages < 0.01 ? (spend.total / spend.messages).toFixed(4) : (spend.total / spend.messages).toFixed(2)}/msg`;
+		const average = spend.messages > 0 ? spend.total / spend.messages : 0;
+		return `󰔛 $${spend.total < 0.01 ? spend.total.toFixed(4) : spend.total.toFixed(2)} · ~$${average < 0.01 ? average.toFixed(4) : average.toFixed(2)}/msg`;
 	}
 
 	let latestCtx: ExtensionContext | undefined;
