@@ -13,12 +13,12 @@ import { truncateToWidth } from "@oh-my-pi/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, type ToolkitConfig } from "./config.ts";
 import { renderStatusline, type StatuslineBudget } from "./statusline-view.ts";
-import { sessionSpend } from "./budget.ts";
+import { sessionSpend, type SessionPrice } from "./budget.ts";
 
 const GATEWAY_URL = "https://ai-llm-gateway.fbr.land";
 const REFRESH_MS = 120_000;
 
-type Price = { input: number; output: number; cacheRead: number; cacheWrite: number };
+type Price = SessionPrice;
 
 type State = {
 	budget?: StatuslineBudget;
@@ -86,9 +86,9 @@ export default function statusline(pi: ExtensionAPI): void {
 	const configCache = (): ToolkitConfig => (cachedConfig ??= loadConfig(pi.pi.settings.getAgentDir()));
 
 	function sessionCostText(ctx: ExtensionContext): string | undefined {
-		const { total, messages } = sessionSpend(ctx);
-		if (total <= 0) return undefined;
-		return `󰔛 $${total.toFixed(2)} · ~$${(total / messages).toFixed(2)}/msg`;
+		const spend = sessionSpend(ctx, state.prices);
+		if (spend.total <= 0) return undefined;
+		return `󰔛 $${spend.total < 0.01 ? spend.total.toFixed(4) : spend.total.toFixed(2)} · ~$${spend.total / spend.messages < 0.01 ? (spend.total / spend.messages).toFixed(4) : (spend.total / spend.messages).toFixed(2)}/msg`;
 	}
 
 	let latestCtx: ExtensionContext | undefined;

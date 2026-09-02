@@ -16,14 +16,22 @@ import { loadConfig, saveConfig } from "./config.ts";
 let gates: number[] = [];
 const fired = new Set<number>();
 
-export function sessionSpend(ctx: ExtensionContext): { total: number; messages: number } {
+export type SessionPrice = { input: number; output: number; cacheRead: number; cacheWrite: number };
+
+export function sessionSpend(ctx: ExtensionContext, prices: Record<string, SessionPrice> = {}): { total: number; messages: number } {
 	let total = 0;
 	let messages = 0;
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-		const usage = (entry.message as AssistantMessage).usage;
+		const message = entry.message as AssistantMessage;
+		const usage = message.usage;
 		if (!usage) continue;
-		total += usage.cost?.total ?? 0;
+		const reported = usage.cost?.total ?? 0;
+		const price = prices[message.model];
+		const calculated = price
+			? (usage.input * price.input + usage.output * price.output + usage.cacheRead * price.cacheRead + usage.cacheWrite * price.cacheWrite) / 1_000_000
+			: 0;
+		total += reported > 0 ? reported : calculated;
 		messages += 1;
 	}
 	return { total, messages };
