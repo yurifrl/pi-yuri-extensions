@@ -18,6 +18,8 @@ import { sessionSpend, type SessionPrice } from "./budget.ts";
 const GATEWAY_URL = "https://ai-llm-gateway.fbr.land";
 const REFRESH_MS = 120_000;
 
+const STATUS_ICONS = ["󰄾", "󰔟", "󰘍", "󰆍", "󰙨", "󰎆", "󰊠", "󰅐"] as const;
+
 type Price = SessionPrice;
 
 type State = {
@@ -78,6 +80,7 @@ async function refresh(state: State, pi: ExtensionAPI, ctx: ExtensionContext): P
 
 export default function statusline(pi: ExtensionAPI): void {
 	const state: State = { prices: {} };
+	let statusIcon = 0;
 	let redraw: (() => void) | undefined;
 	// C22: config reads (fs + JSON.parse + validation) must not run per TUI frame.
 	// Cache for the whole session; invalidated on session_start (the only place this
@@ -129,7 +132,7 @@ export default function statusline(pi: ExtensionAPI): void {
 							},
 							theme,
 						);
-						return [`╰─ ${truncateToWidth(line, Math.max(0, width - 3))}`];
+						return [`${STATUS_ICONS[statusIcon]}  ${truncateToWidth(line, Math.max(0, width - 3))}`];
 					},
 				};
 			},
@@ -137,6 +140,10 @@ export default function statusline(pi: ExtensionAPI): void {
 		);
 		update();
 		ctx.setInterval(update, REFRESH_MS);
+		ctx.setInterval(() => {
+			statusIcon = (statusIcon + 1) % STATUS_ICONS.length;
+			redraw?.();
+		}, 2_000);
 	});
 	pi.on("session_switch", (_event, ctx) => {
 		setLatestCtx(ctx);
