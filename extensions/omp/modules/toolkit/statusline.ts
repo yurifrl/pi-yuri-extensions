@@ -133,7 +133,7 @@ export default function statusline(pi: ExtensionAPI): void {
 					},
 				};
 			},
-			{ placement: "aboveEditor" },
+			{ placement: "belowEditor" },
 		);
 		update();
 		ctx.setInterval(update, REFRESH_MS);
