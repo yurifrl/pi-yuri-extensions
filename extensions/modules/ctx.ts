@@ -9,7 +9,7 @@
  * /ctx status · /ctx off. Persists ctxLimit and ctxLimitAction in pi-yuri-extensions.json. Disable: "modules": { "ctx": false }.
  */
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { readSharedConfig, writeSharedConfig } from "../config.ts";
+import { readSharedConfig, writeSharedConfig } from "./config.ts";
 
 type LimitAction = "compact" | "stop";
 

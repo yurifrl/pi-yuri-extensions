@@ -5,7 +5,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readPiYuConfig } from "./lib/config.ts";
-import { readOmpAwsLogin } from "../omp/awsLoginConfig.ts";
+import { readOmpAwsLogin } from "./lib/awsLoginConfig.ts";
 
 /**
  * awsLogin config resolution:

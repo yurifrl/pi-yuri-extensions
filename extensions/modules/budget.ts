@@ -11,7 +11,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
-import { readSharedConfig, writeSharedConfig } from "../config.ts";
+import { readSharedConfig, writeSharedConfig } from "./config.ts";
 
 let gates: number[] = [];
 const fired = new Set<number>();

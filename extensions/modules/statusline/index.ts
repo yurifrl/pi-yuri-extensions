@@ -13,7 +13,7 @@ import { truncateToWidth } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { readSharedConfig, type YuriExtensionsConfig } from "../config.ts";
 import { renderStatusline, type StatuslineBudget, type StatuslineTheme } from "./view.ts";
-import { sessionSpend, type SessionPrice } from "../budget/index.ts";
+import { sessionSpend, type SessionPrice } from "../budget.ts";
 
 const GATEWAY_URL = "https://ai-llm-gateway.fbr.land";
 const REFRESH_MS = 120_000;
