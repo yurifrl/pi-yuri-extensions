@@ -129,7 +129,7 @@ export default function statusline(pi: ExtensionAPI): void {
 							},
 							theme,
 						);
-						return [`╭── ${truncateToWidth(line, Math.max(0, width - 4))}`];
+						return [`╰─ ${truncateToWidth(line, Math.max(0, width - 3))}`];
 					},
 				};
 			},
