@@ -10,15 +10,16 @@
  * mode (queue every interactive prompt instead of sending), pause/resume, or the manager (edit/skip/remove).
  * Disable: "modules": { "queue": false }.
  */
-import type { ExtensionAPI, ExtensionContext, Theme } from "@oh-my-pi/pi-coding-agent";
-import { Ellipsis, matchesKey, truncateToWidth } from "@oh-my-pi/pi-tui";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 type Item = { text: string; skipped: boolean };
 type State = { items: Item[]; paused: boolean; capture: boolean };
 
-const WIDGET_ID = "toolkit-queue";
+const WIDGET_ID = "yuri-queue";
 const MAX_LABEL = 60; // truncated task text length in widget/manager
 const FIRE_DELAY_MS = 1_000; // let follow-ups/steers land before firing the next item
 
@@ -29,8 +30,10 @@ export default function queue(pi: ExtensionAPI): void {
 	// queued prompt is never injected into a session the user left.
 	let generation = 0;
 
-	// ---- persistence: per session, under <agentDir>/queue/<file>.json ----
-	const queueDir = join(pi.pi.settings.getAgentDir(), "queue");
+	// ---- persistence: per session, under <agentDir>/queue/<file>.json (omp) or
+	// ~/.config/pi-yuri-extensions/queue/ (pi, which has no agent dir) ----
+	const ompAgentDir = (pi as { pi?: { settings?: { getAgentDir?: () => string } } }).pi?.settings?.getAgentDir?.();
+	const queueDir = ompAgentDir ? join(ompAgentDir, "queue") : join(homedir(), ".config", "pi-yuri-extensions", "queue");
 	const stateFile = () => (sessionFile ? join(queueDir, `${sessionFile.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`) : undefined);
 
 	const load = () => {
@@ -61,7 +64,7 @@ export default function queue(pi: ExtensionAPI): void {
 		}
 	};
 
-	const truncate = (text: string) => truncateToWidth(text.replace(/\s+/g, " ").trim(), MAX_LABEL, Ellipsis.Unicode);
+	const truncate = (text: string) => truncateToWidth(text.replace(/\s+/g, " ").trim(), MAX_LABEL, "…");
 
 	// ---- widget above editor ----
 	const refreshWidget = (ctx: ExtensionContext) => {
@@ -109,7 +112,7 @@ export default function queue(pi: ExtensionAPI): void {
 
 	const scheduleFire = (ctx: ExtensionContext) => {
 		const atGeneration = generation;
-		ctx.setTimeout(() => tryFire(ctx, atGeneration), FIRE_DELAY_MS);
+		setTimeout(() => tryFire(ctx, atGeneration), FIRE_DELAY_MS);
 	};
 
 	// Re-key persisted state to the active session. Runs on session_start and on
@@ -133,32 +136,43 @@ export default function queue(pi: ExtensionAPI): void {
 		refreshWidget(ctx);
 	});
 
-	pi.on("session_switch", (_event, ctx) => {
-		rekeySession(ctx);
-		refreshWidget(ctx);
-	});
-
-	pi.on("session_branch", (_event, ctx) => {
-		rekeySession(ctx);
-		refreshWidget(ctx);
-	});
+	// omp-only events (session re-key for /new, /resume, fork, handoff); widened so
+	// the registration typechecks against pi's narrower event map, where session_start
+	// covers resume and no re-key signal exists mid-session.
+	const ompEvents = pi as unknown as { on(event: string, handler: (event: never, ctx: ExtensionContext) => void): void };
+	for (const event of ["session_switch", "session_branch"]) {
+		ompEvents.on(event, (_event, ctx) => {
+			rekeySession(ctx);
+			refreshWidget(ctx);
+		});
+	}
 
 	// No "agent_settled" on omp; agent_end + a short delay approximates it:
 	// the run finished and queued steers/follow-ups have landed.
 	pi.on("agent_end", (_event, ctx) => scheduleFire(ctx));
 
-	// capture mode: queue every interactive prompt instead of sending it
-	pi.on("input", async (event, ctx) => {
-		if (!state.capture) return { handled: false };
-		if (event.source !== "interactive") return { handled: false };
+	// capture mode: queue every interactive prompt instead of sending it.
+	// Widened signature: the {handled} result is omp-specific; pi absorbs the return.
+	// pi uses { action: "handled" }; omp uses { handled: boolean }. The unified
+	// handler satisfies both shapes; the registration is cast through unknown
+	// because neither runtime's result type names the other's vocabulary.
+	(pi as unknown as {
+		on(
+			event: "input",
+			handler: (event: { text: string; source: string }, ctx: ExtensionContext) => Promise<unknown>,
+		): void;
+	}).on("input", async (event, ctx) => {
+		const handled = (value: boolean): unknown => ({ handled: value, action: value ? "handled" : "continue" });
+		if (!state.capture) return handled(false);
+		if (event.source !== "interactive") return handled(false);
 		const text = event.text.trim();
-		if (!text || text.startsWith("/")) return { handled: false };
+		if (!text || text.startsWith("/")) return handled(false);
 		state.items.push({ text, skipped: false });
 		save();
 		refreshWidget(ctx);
 		ctx.ui.notify(`Captured (${state.items.length} in queue)`, "info");
 		scheduleFire(ctx);
-		return { handled: true };
+		return handled(true);
 	});
 
 	const openManager = async (ctx: ExtensionContext) => {
@@ -333,13 +347,13 @@ class ManagerComponent {
 			items.forEach((item, i) => {
 				const sel = i === this.selected;
 				if (sel && this.editing) {
-					const buf = truncateToWidth(this.buffer, Math.max(10, width - 8), Ellipsis.Unicode);
+					const buf = truncateToWidth(this.buffer, Math.max(10, width - 8), "…");
 					lines.push(truncateToWidth(`${th.fg("accent", "→ ✎")} ${buf}${th.fg("accent", "▉")}`, width));
 					return;
 				}
 				const arrow = sel ? th.fg("accent", "→ ") : "  ";
 				const mark = item.skipped ? th.fg("dim", "⊘") : th.fg("success", "▶");
-				const label = truncateToWidth(item.text.replace(/\s+/g, " ").trim(), Math.max(10, width - 8), Ellipsis.Unicode);
+				const label = truncateToWidth(item.text.replace(/\s+/g, " ").trim(), Math.max(10, width - 8), "…");
 				const styled = item.skipped ? th.fg("dim", label) : sel ? th.fg("accent", label) : th.fg("muted", label);
 				lines.push(truncateToWidth(`${arrow}${mark} ${styled}`, width));
 			});

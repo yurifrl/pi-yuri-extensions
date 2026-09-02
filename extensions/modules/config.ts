@@ -20,7 +20,6 @@ export const MODULE_NAMES = [
   "statusline",
   "thinking",
   "update",
-  "toolkit",
 ] as const;
 
 export type ModuleName = (typeof MODULE_NAMES)[number];
@@ -57,7 +56,10 @@ export const STATUSLINE_DEFAULT_SEGMENTS: StatuslineSegment[] = [
   { name: "kube", color: "success" },
 ];
 
-/** Toolkit top-level fields (see omp/modules/toolkit/). */
+export type StatuslineSegmentName = (typeof STATUSLINE_SEGMENT_NAMES)[number];
+export type StatuslineColor = (typeof STATUSLINE_COLORS)[number];
+
+/** Toolkit top-level fields (see modules/budget, modules/ctx, omp/modules/continue). */
 export interface StatuslineSegment {
   name: (typeof STATUSLINE_SEGMENT_NAMES)[number];
   color?: (typeof STATUSLINE_COLORS)[number];
@@ -105,4 +107,33 @@ export const DEFAULT_CONFIG: Required<Pick<YuriExtensionsConfig, "modules">> & P
 
 export function isModuleEnabled(config: YuriExtensionsConfig | undefined, name: ModuleName): boolean {
   return config?.modules?.[name]?.enabled ?? DEFAULT_CONFIG.modules[name]?.enabled ?? true;
+}
+
+// ---------------------------------------------------------------------------
+// Shared config store — runtime-agnostic read/write of pi-yuri-extensions.json.
+// Each runtime resolves its own global config path: omp passes
+// pi.pi.settings.getAgentDir(), pi passes its global config dir. Modules in
+// this directory never touch the filesystem directly.
+// ---------------------------------------------------------------------------
+
+export interface ConfigStore {
+  read(): YuriExtensionsConfig;
+  write(config: YuriExtensionsConfig): void;
+}
+
+let store: ConfigStore | undefined;
+
+/** Register the runtime config store. Called once by each runtime's loader. */
+export function setConfigStore(impl: ConfigStore): void {
+  store = impl;
+}
+
+/** Read the shared config. Falls back to defaults when no store is registered. */
+export function readSharedConfig(): YuriExtensionsConfig {
+  return store?.read() ?? DEFAULT_CONFIG;
+}
+
+/** Write through the registered store. No-op when none is registered. */
+export function writeSharedConfig(config: YuriExtensionsConfig): void {
+  store?.write(config);
 }

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -222,7 +222,7 @@ async function handleShow(ctx: ExtensionContext, cwd: string): Promise<void> {
 	notify(ctx, lines.join("\n"), "info");
 }
 
-const HOOK_MARKER = "# toolkit-coderabbit pre-push hook";
+const HOOK_MARKER = "# yuri-coderabbit pre-push hook";
 const HOOK_BODY = `#!/bin/sh
 ${HOOK_MARKER}
 branch=$(git rev-parse --abbrev-ref HEAD | tr '/' '-')

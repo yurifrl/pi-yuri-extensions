@@ -9,7 +9,7 @@
  * Disable: "modules": { "continue": false }.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { loadConfig } from "./config.ts";
+import { readSharedConfig } from "../../modules/config.ts";
 
 export const DEFAULT_PROMPT = "Context compacted. Continue the current task from the compaction summary. Do not ask for the next step.";
 /**
@@ -29,7 +29,7 @@ export default function continueAfterCompact(pi: ExtensionAPI): void {
 	let autoCompactionDepth = 0;
 
 	pi.on("session_start", (_event, ctx) => {
-		prompt = loadConfig(pi.pi.settings.getAgentDir()).continueAfterCompactPrompt?.trim() || DEFAULT_PROMPT;
+		prompt = readSharedConfig().continueAfterCompactPrompt?.trim() || DEFAULT_PROMPT;
 	});
 
 	pi.on("auto_compaction_start", () => {

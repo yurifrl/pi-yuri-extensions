@@ -1,5 +1,8 @@
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
+import { homedir } from "node:os";
+import { setConfigStore, type YuriExtensionsConfig } from "../modules/config.ts";
 import { readPiYuConfigFile } from "./config.ts";
 
 type ExtensionModule = { default?: (pi: ExtensionAPI) => void };
@@ -28,7 +31,36 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   envs: () => import("../modules/envs.ts"),
   conductor: () => import("../modules/conductor.ts"),
   checkpoint: () => import("../modules/checkpoint/pi.ts"),
+  budget: () => import("../modules/budget/index.ts"),
+  coderabbit: () => import("../modules/coderabbit/index.ts"),
+  ctx: () => import("../modules/ctx/index.ts"),
+  exit: () => import("../modules/exit/index.ts"),
+  handoff: () => import("../modules/handoff/index.ts"),
+  queue: () => import("../modules/queue/index.ts"),
+  quick: () => import("../modules/quick/index.ts"),
+  respond: () => import("../modules/respond/index.ts"),
+  statusline: () => import("../modules/statusline/index.ts"),
+  thinking: () => import("../modules/thinking/index.ts"),
 };
+
+// Shared config store for modules/*: pi resolves it to the global
+// ~/.pi/agent/extensions/pi-yuri-extensions.json (no agent dir concept).
+const SHARED_CONFIG_PATH = path.join(homedir(), ".pi", "agent", "extensions", "pi-yuri-extensions.json");
+
+setConfigStore({
+  read(): YuriExtensionsConfig {
+    if (!existsSync(SHARED_CONFIG_PATH)) return {};
+    try {
+      return JSON.parse(readFileSync(SHARED_CONFIG_PATH, "utf8")) as YuriExtensionsConfig;
+    } catch {
+      return {};
+    }
+  },
+  write(config: YuriExtensionsConfig): void {
+    mkdirSync(path.dirname(SHARED_CONFIG_PATH), { recursive: true });
+    writeFileSync(SHARED_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  },
+});
 
 const DEFAULT_CONFIG: ToggleConfig = {
   extensions: Object.fromEntries(Object.keys(MODULE_LOADERS).map((name) => [name, false])),

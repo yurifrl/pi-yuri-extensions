@@ -1,16 +1,18 @@
 # Changelog
 
-## 2026-09-01 OMP: port @fbr/toolkit into pi-yuri-extensions
+## 2026-09-01 Port @fbr/toolkit into shared + omp modules
 
 ### Added
-- `extensions/omp/modules/toolkit/` — the full `@fbr/toolkit` plugin ported from the omp-marketplace repo (budget, coderabbit, continue, ctx, exit, handoff, queue, quick, respond, statusline, statusline-view, thinking, update) plus `coderabbit.test.ts` and the module entry `index.ts`.
-- `extensions/omp/modules/toolkit/config.ts` — adapter keeping the original toolkit config surface (`loadConfig`/`saveConfig`/`bootstrapConfig`, `MODULE_KEYS`, statusline constants) but backed by the shared YuriExtensionsConfig store, so `toolkit.json` is gone.
-- Toolkit top-level fields on `YuriExtensionsConfig` (`budgetGates`, `ctxLimit`, `ctxLimitAction`, `continueAfterCompactPrompt`, `statusline`) with statusline constants/types in `extensions/modules/config.ts`; `readOmpConfig` passes them through.
-- `toolkit` module registered in the OMP loader; per-module toggles still work via `modules.<key>.enabled`.
+- Shared runtime-neutral modules under `extensions/modules/<name>/index.ts` (ported from `@fbr/toolkit` in the omp-marketplace repo): `budget`, `coderabbit` (+ `index.test.ts`), `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `statusline` (+ `view.ts`), `thinking`.
+- OMP-only modules: `extensions/omp/modules/continue.ts` (needs the omp auto-compaction event bracket) and `extensions/omp/modules/update.ts` (omp plugin-store paths).
+- Runtime-agnostic config store in `extensions/modules/config.ts` (`setConfigStore`/`readSharedConfig`/`writeSharedConfig`): omp points it at `~/.omp/agent/extensions/pi-yuri-extensions.json`, pi at `~/.pi/agent/extensions/pi-yuri-extensions.json`. Modules never touch the filesystem directly.
+- Toolkit top-level fields on `YuriExtensionsConfig`: `budgetGates`, `ctxLimit`, `ctxLimitAction`, `continueAfterCompactPrompt`, `statusline` (+ statusline constants/types).
 - `tsconfig.json` + `@types/node` dev dep for `bunx tsc -p tsconfig.json` typechecking.
 
 ### Changed
-- User config: `~/.omp/agent/extensions/toolkit.json` merged into `~/.omp/agent/extensions/pi-yuri-extensions.json` (top-level `ctxLimit`, `ctxLimitAction`, `statusline`; module keys into `modules`); toolkit.json and legacy `~/.omp/agent/fbr-toolkit.json` removed.
+- Every module registers individually in its runtime loader (`extensions/omp/index.ts`, `extensions/pi/index.ts`); pi-side toggles default OFF per repo convention, omp-side ON.
+- Dual-runtime compatibility shims where the APIs diverge: `truncateToWidth` ellipsis argument, `session_switch`/`session_branch`/`willContinue` guarded as omp-only, `ctx.compact()` thenable-agnostic, unified `input` result shape, `ctx.models` fallback to `modelRegistry.getAvailable()`, `ThinkingLevel` as plain string union.
+- User config: `~/.omp/agent/extensions/toolkit.json` merged into `~/.omp/agent/extensions/pi-yuri-extensions.json`; toolkit.json and legacy `~/.omp/agent/fbr-toolkit.json` removed.
 
 ### Notes
 - Source marketplace plugin left untouched on its feature branch; upstream can keep or drop it independently.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseAgentJsonl, formatCounts } from "./coderabbit.ts";
+import { parseAgentJsonl, formatCounts } from "./index.ts";
 
 const SAMPLE = [
 	'{"type":"review_context","base":"main"}',

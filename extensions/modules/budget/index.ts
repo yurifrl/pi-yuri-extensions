@@ -9,9 +9,9 @@
  * /budget — show gates and spend · /budget 50,100 — set (positive, deduped, sorted) · /budget off — clear. Gates
  * persist as `budgetGates` in pi-yuri-extensions.json and apply to every session. Disable: "modules": { "budget": false }.
  */
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { loadConfig, saveConfig } from "./config.ts";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { readSharedConfig, writeSharedConfig } from "../config.ts";
 
 let gates: number[] = [];
 const fired = new Set<number>();
@@ -56,9 +56,11 @@ function parseGates(value: string): number[] {
 export default function budget(pi: ExtensionAPI): void {
 	pi.on("session_start", () => {
 		fired.clear();
-		gates = loadConfig(pi.pi.settings.getAgentDir()).budgetGates ?? [];
+		gates = readSharedConfig().budgetGates ?? [];
 	});
-	pi.on("session_switch", () => fired.clear());
+	// omp-only event (fires for /new, /resume, fork, handoff); registered through a
+	// widened signature so the same code typechecks against pi's narrower event map.
+	(pi as { on(event: string, handler: () => void): void }).on("session_switch", () => fired.clear());
 	pi.on("turn_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		const cost = sessionSpend(ctx);
@@ -95,8 +97,7 @@ export default function budget(pi: ExtensionAPI): void {
 				gates = parsed;
 			}
 			fired.clear();
-			const agentDir = pi.pi.settings.getAgentDir();
-			saveConfig(agentDir, { ...loadConfig(agentDir), budgetGates: gates });
+			writeSharedConfig({ ...readSharedConfig(), budgetGates: gates });
 			ctx.ui.notify(
 				gates.length ? `Budget gates saved: ${gates.map((gate) => `$${gate}`).join(", ")}` : "Budget gates disabled.",
 				"info",

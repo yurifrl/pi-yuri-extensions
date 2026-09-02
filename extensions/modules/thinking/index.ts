@@ -5,11 +5,12 @@
  * accepted, warning when it was clamped to the model's limit. Bare /thinking opens a picker (or prints the current
  * level non-interactively); argument completion suggests the levels. Disable: "modules": { "thinking": false }.
  */
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent";
-import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { AutocompleteItem } from "@mariozechner/pi-tui";
 
-const LEVELS: readonly ThinkingLevel[] = Object.values(ThinkingLevel).filter((v): v is ThinkingLevel => v !== "inherit");
+/** Union of levels both runtimes accept (pi has no "max"/"inherit"; omp clamps "max"). */
+const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = (typeof LEVELS)[number];
 
 function applyLevel(pi: ExtensionAPI, level: ThinkingLevel, ctx: ExtensionCommandContext): void {
 	pi.setThinkingLevel(level);

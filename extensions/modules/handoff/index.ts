@@ -9,9 +9,8 @@
  * /handoff [focus] — confirm → edit the generated handoff → a new child session opens with it in the composer; submit
  * to continue. Requires an interactive session with a selected model. Disable: "modules": { "handoff": false }.
  */
-import { complete } from "@oh-my-pi/pi-ai";
-import { convertToLlm, type ExtensionAPI, type SessionEntry } from "@oh-my-pi/pi-coding-agent";
-import { serializeConversation } from "@oh-my-pi/pi-agent-core/compaction";
+import { complete } from "@mariozechner/pi-ai";
+import { convertToLlm, serializeConversation, type ExtensionAPI, type SessionEntry } from "@mariozechner/pi-coding-agent";
 
 const HANDOFF_PROMPT = `Write a concise markdown handoff for a fresh coding-agent session. Output only: Context, Current state, Files & artifacts, Open questions / next steps. Reference paths, URLs, and commit SHAs instead of duplicating content. Redact secrets.`;
 
@@ -61,7 +60,7 @@ export default function handoff(pi: ExtensionAPI): void {
 			const response = await complete(
 				ctx.model,
 				{
-					systemPrompt: [HANDOFF_PROMPT],
+					systemPrompt: HANDOFF_PROMPT,
 					messages: [
 						{
 							role: "user",

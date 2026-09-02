@@ -8,9 +8,11 @@ Your personal **pi package hub**.
 
 ## Shared runtime architecture
 
-The package has one feature vocabulary across Pi and OMP: `checkpoint`, `envs`, `editor`, and `session-id`. The filesystem mirrors the integration boundary: `extensions/pi/` contains Pi-only entrypoints, `extensions/omp/` contains OMP-only entrypoints, and `extensions/modules/` owns reusable feature packages.
+The package has one feature vocabulary across Pi and OMP. The filesystem mirrors the integration boundary: `extensions/pi/` contains Pi-only entrypoints, `extensions/omp/` contains OMP-only entrypoints, and `extensions/modules/` owns runtime-neutral feature packages usable by both.
 
-Checkpoint is the model feature: `extensions/modules/checkpoint/core.ts` is runtime-neutral, `pi.ts` and `omp.ts` translate only their own runtime APIs, and `skills/checkpoint/SKILL.md` is the shared workflow. Pi loads `extensions/pi/index.ts`; OMP loads `extensions/omp/index.ts`.
+Shared modules (both runtimes): `aws`, `budget`, `checkpoint`, `coderabbit`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `save`, `session-id`, `statusline`, `thinking`. OMP-exclusive (depends on omp events/agent-dir): `continue`, `editor`, `envs`, `nudge`, `notifications`, `update`, `working`. Pi-exclusive: `copy-slack`, `draft`, `e`, `git`, `greetings`, `helpy`, `memwatch`, `pi-beads`, `yes`, `conductor`.
+
+Checkpoint is the model feature: `extensions/modules/checkpoint/core.ts` is runtime-neutral, `pi.ts` and `omp.ts` translate only their own runtime APIs, and `skills/checkpoint/SKILL.md` is the shared workflow. Pi loads `extensions/pi/index.ts`; OMP loads `extensions/omp/index.ts`. Shared modules read/write the toolkit top-level fields (`budgetGates`, `ctxLimit`, `ctxLimitAction`, `continueAfterCompactPrompt`, `statusline`) through the runtime-agnostic config store in `extensions/modules/config.ts`; each runtime points it at its own global `pi-yuri-extensions.json`.
 
 Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omitted modules use the defaults:
 
@@ -34,7 +36,6 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
         "toolError": false
       }
     },
-    "toolkit": { "enabled": true },
     "budget": { "enabled": true },
     "ctx": { "enabled": true }
   },
@@ -62,7 +63,6 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 | `working` | `stillAfterSeconds` | `45` | Seconds of silence before the label flips to "Still working…". |
 | `working` | `debug` | `false` | Log event/timer diagnostics to the omp log. |
 | `notifications` | `events.<id>` | per event | Per-event banner on/off. Event ids: `promptedInput`, `dangerousCommand` (yolo only), `blockedCommand`, `question`, `agentError`, `toolError`. |
-| `toolkit` | (bundle) | `true` | The whole toolkit bundle from `extensions/omp/modules/toolkit/` (ported from `@fbr/toolkit`). Individual modules gate via their own keys: `budget`, `coderabbit`, `continue`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `statusline`, `thinking`, `update`. |
 | `budgetGates` | `[]` | Toolkit top-level: USD spend gates applied to every session; set via `/budget`. |
 | `ctxLimit` / `ctxLimitAction` | unset / `compact` | Toolkit top-level: artificial context cap and the action at the cap; set via `/ctx`. |
 | `continueAfterCompactPrompt` | built-in | Toolkit top-level: prompt re-sent after automatic maintenance compaction. |
@@ -110,29 +110,50 @@ Example:
 Pi-side toggles (`extensions` map, all OFF by default):
 
 - `aws`
+- `budget`
 - `checkpoint`
+- `coderabbit`
 - `copy-slack`
+- `ctx`
 - `draft`
 - `e`
+- `exit`
 - `git`
 - `greetings`
+- `handoff`
 - `helpy`
 - `memwatch`
+- `queue`
+- `quick`
+- `respond`
 - `session-id`
+- `statusline`
+- `thinking`
 - `yes`
 
 OMP-side modules (`modules` map, all ON by default):
 
 - `aws`
+- `budget`
 - `checkpoint`
+- `coderabbit`
+- `continue`
+- `ctx`
 - `editor`
 - `envs`
+- `exit`
+- `handoff`
 - `nudge`
 - `notifications`
+- `queue`
+- `quick`
+- `respond`
 - `save`
 - `session-id`
+- `statusline`
+- `thinking`
+- `update`
 - `working`
-- `toolkit` (and its sub-keys `budget`, `coderabbit`, `continue`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `statusline`, `thinking`, `update`)
 
 ## Commands
 

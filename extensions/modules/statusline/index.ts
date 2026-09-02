@@ -6,14 +6,14 @@
  * so refreshes follow the current session; turn ends redraw immediately. Config is cached for the whole session —
  * render never touches the fs. All collection is best-effort: missing env, CLI, or key just hides the segment.
  *
- * Rendering lives in statusline-view.ts; segments/order/colors configure via pi-yuri-extensions.json. Requires AIHUB_API_KEY for
+ * Rendering lives in view.ts; segments/order/colors configure via pi-yuri-extensions.json. Requires AIHUB_API_KEY for
  * the budget segment. Disable: "modules": { "statusline": false }.
  */
-import { truncateToWidth } from "@oh-my-pi/pi-tui";
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { loadConfig, type ToolkitConfig } from "./config.ts";
-import { renderStatusline, type StatuslineBudget } from "./statusline-view.ts";
-import { sessionSpend, type SessionPrice } from "./budget.ts";
+import { truncateToWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { readSharedConfig, type YuriExtensionsConfig } from "../config.ts";
+import { renderStatusline, type StatuslineBudget, type StatuslineTheme } from "./view.ts";
+import { sessionSpend, type SessionPrice } from "../budget/index.ts";
 
 const GATEWAY_URL = "https://ai-llm-gateway.fbr.land";
 const REFRESH_MS = 120_000;
@@ -85,8 +85,8 @@ export default function statusline(pi: ExtensionAPI): void {
 	// C22: config reads (fs + JSON.parse + validation) must not run per TUI frame.
 	// Cache for the whole session; invalidated on session_start (the only place this
 	// module's config-affecting fields can change through the plugin's own commands).
-	let cachedConfig: ToolkitConfig | undefined;
-	const configCache = (): ToolkitConfig => (cachedConfig ??= loadConfig(pi.pi.settings.getAgentDir()));
+	let cachedConfig: YuriExtensionsConfig | undefined;
+	const configCache = (): YuriExtensionsConfig => (cachedConfig ??= readSharedConfig());
 
 	function sessionCostText(ctx: ExtensionContext): string {
 		const spend = sessionSpend(ctx, state.prices);
@@ -124,31 +124,36 @@ export default function statusline(pi: ExtensionAPI): void {
 						const line = renderStatusline(
 							configCache(),
 							{
-								contextTokens: active.getContextUsage()?.tokens,
+								contextTokens: active.getContextUsage()?.tokens ?? undefined,
 								budget: state.budget,
 								cost: sessionCostText(active),
 								aws: state.aws,
 								kube: state.kube,
 							},
-							theme,
+							theme as unknown as StatuslineTheme,
 						);
-						return [`${STATUS_ICONS[statusIcon]}  ${truncateToWidth(line, Math.max(0, width - 3))}`];
+						return [`${STATUS_ICONS[statusIcon]}   ${truncateToWidth(line, Math.max(0, width - 3))}`];
 					},
 				};
 			},
 			{ placement: "aboveEditor" },
 		);
 		update();
-		ctx.setInterval(update, REFRESH_MS);
-		ctx.setInterval(() => {
+		setInterval(update, REFRESH_MS);
+		setInterval(() => {
 			statusIcon = (statusIcon + 1) % STATUS_ICONS.length;
 			redraw?.();
 		}, 2_000);
 	});
-	pi.on("session_switch", (_event, ctx) => {
-		setLatestCtx(ctx);
-		update();
-	});
+	// omp-only event: refreshes follow the switched-to session. Widened so the
+	// registration typechecks against pi's narrower event map.
+	(pi as unknown as { on(event: string, handler: (event: never, ctx: ExtensionContext) => void): void }).on(
+		"session_switch",
+		(_event, ctx) => {
+			setLatestCtx(ctx);
+			update();
+		},
+	);
 	pi.on("turn_end", (_event, ctx) => {
 		setLatestCtx(ctx);
 		redraw?.();

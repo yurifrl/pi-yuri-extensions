@@ -6,7 +6,7 @@
  *
  * /respond [N] — N defaults to 1; errors list how many assistant messages exist. Disable: "modules": { "respond": false }.
  */
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 type Entry = {
 	type: string;

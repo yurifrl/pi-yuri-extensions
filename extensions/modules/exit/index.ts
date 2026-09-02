@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 /**
  * Exit — registers the `exit` tool.
@@ -27,10 +27,9 @@ export default function exit(pi: ExtensionAPI): void {
 			},
 			additionalProperties: false,
 		},
-		// Not a workspace mutation: it terminates the process. Read tier keeps it
-		// auto-approved in write mode; yolo and per-tool overrides still apply.
-		approval: "read",
-		loadMode: "essential",
+		// omp-only fields (approval tier, tool-schema load mode). Registered through a
+		// widened type so the same definition typechecks against pi, which lacks them.
+		...(pi ? { approval: "read" as const, loadMode: "essential" as const } : {}),
 		execute: async (_toolCallId, params: { reason?: string }, _signal, _onUpdate, ctx) => {
 			ctx.shutdown();
 			return {
@@ -40,6 +39,7 @@ export default function exit(pi: ExtensionAPI): void {
 						text: params.reason ? `Session ending: ${params.reason}` : "Session ending.",
 					},
 				],
+				details: undefined,
 			};
 		},
 	});

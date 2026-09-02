@@ -10,13 +10,14 @@
  * /quick-oppus | /qo — aihub/claude-opus-5 · /quick-gpt | /qg — aihub/gpt-5.6-terra · /quick-oppus-plan | /qop and
  * /quick-gpt-plan | /qgp — one-shot "Plan: <script>". Disable: "modules": { "quick": false }.
  */
-import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent";
-import type { Model } from "@oh-my-pi/pi-ai";
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { Model } from "@mariozechner/pi-ai";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 type Target = "oppus" | "gpt";
 
-type Baseline = { model: Model; thinking: ThinkingLevel | undefined };
+type AnyModel = Parameters<ExtensionAPI["setModel"]> extends [infer M] ? M : never;
+type Baseline = { model: AnyModel; thinking: ThinkingLevel | undefined };
 
 type State = {
 	/** Model + thinking level to restore when the quick switch ends. */
@@ -32,13 +33,16 @@ const TARGETS: Record<Target, { spec: string; patterns: RegExp[] }> = {
 	gpt: { spec: "aihub/gpt-5.6-terra", patterns: [/gpt-5\.6-terra(?!-pro)/i] },
 };
 
-function resolveTarget(ctx: ExtensionCommandContext, target: Target): Model | undefined {
+function resolveTarget(ctx: ExtensionCommandContext, target: Target): AnyModel | undefined {
 	const { spec, patterns } = TARGETS[target];
-	const models = ctx.models;
-	const resolved = models.resolve(spec);
+	// ctx.models (resolve/list) is omp-only; pi resolves through modelRegistry.getAvailable().
+	type Catalog = { resolve(spec: string): AnyModel | undefined; list(): AnyModel[] };
+	const models = (ctx as { models?: Catalog }).models;
+	const resolved = models?.resolve(spec);
 	if (resolved) return resolved;
+	const pool: AnyModel[] = models ? models.list() : ctx.modelRegistry.getAvailable();
 	// Fallback for machines whose catalog drifted from the pinned spec.
-	return models.list().find((m) => patterns.some((p) => p.test(`${m.provider}/${m.id} ${m.name}`)));
+	return pool.find((m) => patterns.some((p) => p.test(`${m.provider}/${m.id} ${m.name}`)));
 }
 
 function restore(pi: ExtensionAPI, state: State): Promise<boolean> {
@@ -63,7 +67,7 @@ function restore(pi: ExtensionAPI, state: State): Promise<boolean> {
 	});
 }
 
-async function switchTo(pi: ExtensionAPI, ctx: ExtensionCommandContext, target: Target): Promise<Model | undefined> {
+async function switchTo(pi: ExtensionAPI, ctx: ExtensionCommandContext, target: Target): Promise<AnyModel | undefined> {
 	const model = resolveTarget(ctx, target);
 	if (!model) {
 		ctx.ui.notify(`Quick: ${TARGETS[target].spec} not found in the model catalog.`, "error");
@@ -92,7 +96,7 @@ async function run(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: State,
 	}
 	state.activeTarget = target;
 	if (!(await switchTo(pi, ctx, target))) {
-		if (!state.baseline || ctx.models.current()?.id === state.baseline.model.id) {
+		if (!state.baseline || ctx.model?.id === state.baseline.model.id) {
 			// Switch failed before we left the baseline model: drop the whole activation.
 			state.baseline = undefined;
 			state.activeTarget = undefined;
@@ -154,7 +158,7 @@ function commandHandler(
 		state.activeTarget = target;
 		if (await switchTo(pi, ctx, target)) {
 			ctx.ui.notify(`Quick ${target}: on — ${TARGETS[target].spec} for this session`, "info");
-		} else if (state.baseline && ctx.models.current()?.id === state.baseline.model.id) {
+		} else if (state.baseline && ctx.model?.id === state.baseline.model.id) {
 			state.baseline = undefined;
 			state.activeTarget = undefined;
 		}
@@ -167,7 +171,9 @@ export default function quick(pi: ExtensionAPI): void {
 	pi.on("agent_end", (event) => {
 		// willContinue: auto-retry/continuation is scheduled; the run is not done.
 		// Keep the one-shot armed and restore on the first real settle.
-		if (event.willContinue) return;
+		// omp fires willContinue on auto-retry; pi's agent_end has no such flag —
+		// restoring on every settle is safe there (no pending continuation exists).
+		if ((event as { willContinue?: boolean }).willContinue) return;
 		if (state.oneShot?.armed && state.activeTarget) {
 			state.oneShot = undefined;
 			void restore(pi, state);

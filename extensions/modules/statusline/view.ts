@@ -5,7 +5,13 @@
  * theme, and gets the joined segment string. Context and budget segments shift to warning/error past 50%/75% of their
  * limit unless a color is configured; empty segments drop out.
  */
-import { STATUSLINE_DEFAULT_SEGMENTS, type StatuslineColor, type StatuslineSegmentName, type ToolkitConfig } from "./config.ts";
+import {
+  STATUSLINE_DEFAULT_SEGMENTS,
+  type StatuslineColor,
+  type StatuslineSegmentName,
+  type StatuslineSegment,
+  type YuriExtensionsConfig,
+} from "../config.ts";
 
 export type StatuslineBudget = { spentUsd: number; limitUsd: number; limitEnabled: boolean };
 
@@ -55,7 +61,7 @@ function resolveColor(
 	return DEFAULT_COLORS[segment];
 }
 
-export function renderStatusline(config: ToolkitConfig, snapshot: StatuslineSnapshot, theme: StatuslineTheme): string {
+export function renderStatusline(config: YuriExtensionsConfig, snapshot: StatuslineSnapshot, theme: StatuslineTheme): string {
 	const contextPercent = config.ctxLimit && snapshot.contextTokens ? (snapshot.contextTokens / config.ctxLimit) * 100 : 0;
 	const budgetPercent =
 		snapshot.budget?.limitEnabled && snapshot.budget.limitUsd > 0 ? (snapshot.budget.spentUsd / snapshot.budget.limitUsd) * 100 : 0;

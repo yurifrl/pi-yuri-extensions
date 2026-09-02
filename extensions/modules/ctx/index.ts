@@ -8,8 +8,8 @@
  * /ctx — visual picker (arrows ±50k, digits = thousands, "o" off) · /ctx set 100k|1m · /ctx action compact|stop ·
  * /ctx status · /ctx off. Persists ctxLimit and ctxLimitAction in pi-yuri-extensions.json. Disable: "modules": { "ctx": false }.
  */
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { loadConfig, saveConfig } from "./config.ts";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { readSharedConfig, writeSharedConfig } from "../config.ts";
 
 type LimitAction = "compact" | "stop";
 
@@ -27,7 +27,8 @@ function parseTokens(value: string): number | undefined {
 	return Number.isFinite(amount) && amount > 0 ? Math.round(amount * multiplier) : undefined;
 }
 
-export function formatTokens(tokens: number | undefined): string {
+export function formatTokens(tokens: number | null | undefined): string {
+	if (tokens === null) return "off";
 	if (tokens === undefined) return "off";
 	if (tokens < 1_000) return `${tokens}`;
 	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}m`;
@@ -51,9 +52,8 @@ function renderBar(value: number, max: number, width: number): string {
 	return `${bar}\x1b[0m`;
 }
 
-function persist(pi: ExtensionAPI): void {
-	const agentDir = pi.pi.settings.getAgentDir();
-	saveConfig(agentDir, { ...loadConfig(agentDir), ctxLimit: limit, ctxLimitAction: action });
+function persist(): void {
+	writeSharedConfig({ ...readSharedConfig(), ctxLimit: limit, ctxLimitAction: action });
 }
 
 async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
@@ -94,7 +94,7 @@ async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
 					const cells = Math.max(16, Math.min(56, width - 16));
 					const percentage = Math.round((value / max) * 100);
 					const currentPosition =
-						currentTokens === undefined
+						currentTokens == null
 							? undefined
 							: Math.max(0, Math.min(cells - 1, Math.round((currentTokens / max) * (cells - 1))));
 					const marker =
@@ -123,7 +123,7 @@ async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
 
 export default function contextLimit(pi: ExtensionAPI): void {
 	pi.on("session_start", () => {
-		const config = loadConfig(pi.pi.settings.getAgentDir());
+		const config = readSharedConfig();
 		limit = config.ctxLimit;
 		action = config.ctxLimitAction ?? "compact";
 		armed = true;
@@ -131,7 +131,7 @@ export default function contextLimit(pi: ExtensionAPI): void {
 	pi.on("turn_end", (_event, ctx) => {
 		if (limit === undefined) return;
 		const usage = ctx.getContextUsage();
-		if (usage === undefined || usage.tokens < limit) {
+		if (usage === undefined || usage.tokens === null || usage.tokens < limit) {
 			armed = true;
 			return;
 		}
@@ -149,11 +149,13 @@ export default function contextLimit(pi: ExtensionAPI): void {
 		// this handler. Detach it, and re-arm on failure so a transient error
 		// ("Nothing to compact", "Compaction already in progress") does not silently
 		// disable the cap for the rest of the session.
-		ctx.compact().catch((error: unknown) => {
-			armed = true;
-			const message = `Context limit compaction failed: ${error instanceof Error ? error.message : String(error)}`;
-			if (ctx.hasUI) ctx.ui.notify(message, "error");
-		});
+		const result = ctx.compact() as unknown;
+		if (result instanceof Promise)
+			result.catch((error: unknown) => {
+				armed = true;
+				const message = `Context limit compaction failed: ${error instanceof Error ? error.message : String(error)}`;
+				if (ctx.hasUI) ctx.ui.notify(message, "error");
+				});
 	});
 	pi.registerCommand("ctx", {
 		description: "Set an artificial context cap; bare /ctx opens the visual picker",
@@ -180,7 +182,7 @@ export default function contextLimit(pi: ExtensionAPI): void {
 				return;
 			}
 			armed = true;
-			persist(pi);
+			persist();
 			ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}`, "info");
 		},
 	});
