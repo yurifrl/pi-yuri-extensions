@@ -52,6 +52,14 @@ function renderBar(value: number, max: number, width: number): string {
 	return `${bar}\x1b[0m`;
 }
 
+/** Shared signal for the omp continue module: state of ctx-cap-triggered compactions. */
+export const ctxCompaction = {
+	/** True while a ctx-cap-triggered compaction is in flight. */
+	inFlight: false,
+	/** Whether the most recent compaction was triggered by the ctx cap. */
+	fromCap: false,
+};
+
 function persist(): void {
 	writeSharedConfig({ ...readSharedConfig(), ctxLimit: limit, ctxLimitAction: action });
 }
@@ -144,18 +152,22 @@ export default function contextLimit(pi: ExtensionAPI): void {
 		if (!armed) return;
 		armed = false;
 		ctx.ui.notify(`Context limit ${formatTokens(limit)} reached (${formatTokens(usage.tokens)}). Compacting.`, "warning");
-		// `session.compact()` aborts the live run and waits for the agent to go idle;
-		// awaiting it here would deadlock, because the agent loop is itself awaiting
-		// this handler. Detach it, and re-arm on failure so a transient error
-		// ("Nothing to compact", "Compaction already in progress") does not silently
-		// disable the cap for the rest of the session.
 		const result = ctx.compact() as unknown;
-		if (result instanceof Promise)
-			result.catch((error: unknown) => {
-				armed = true;
-				const message = `Context limit compaction failed: ${error instanceof Error ? error.message : String(error)}`;
-				if (ctx.hasUI) ctx.ui.notify(message, "error");
+		if (result instanceof Promise) {
+			ctxCompaction.inFlight = true;
+			ctxCompaction.fromCap = true;
+			result
+				.catch((error: unknown) => {
+					armed = true;
+					const message = `Context limit compaction failed: ${error instanceof Error ? error.message : String(error)}`;
+					if (ctx.hasUI) ctx.ui.notify(message, "error");
+				})
+				.finally(() => {
+					ctxCompaction.inFlight = false;
 				});
+		} else {
+			ctxCompaction.inFlight = false;
+		}
 	});
 	pi.registerCommand("ctx", {
 		description: "Set an artificial context cap; bare /ctx opens the visual picker",

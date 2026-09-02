@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, type YuriExtensionsConfig } from "../modules/config.ts";
+import { DEFAULT_CONFIG, migrateStatusline, type YuriExtensionsConfig } from "../modules/config.ts";
 
 export const CONFIG_PATH = path.join(homedir(), ".omp", "agent", "extensions", "pi-yuri-extensions.json");
 
@@ -19,8 +19,7 @@ export function readOmpConfig(): YuriExtensionsConfig {
       budgetGates: raw.budgetGates as number[] | undefined,
       ctxLimit: raw.ctxLimit as number | undefined,
       ctxLimitAction: raw.ctxLimitAction as "compact" | "stop" | undefined,
-      continueAfterCompactPrompt: raw.continueAfterCompactPrompt as string | undefined,
-      statusline: raw.statusline as YuriExtensionsConfig["statusline"],
+      statusline: migrateStatusline(raw.statusline as unknown),
     };
   } catch {
     return DEFAULT_CONFIG;

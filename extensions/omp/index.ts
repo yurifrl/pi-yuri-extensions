@@ -13,7 +13,7 @@ import exitTool from "../modules/exit.ts";
 import handoff from "../modules/handoff.ts";
 import nudge from "./modules/nudge.ts";
 import notifications from "./modules/notifications.ts";
-import queue from "../modules/queue.ts";
+import later from "../modules/later.ts";
 import quick from "../modules/quick.ts";
 import respond from "../modules/respond.ts";
 import save from "../modules/save.ts";
@@ -41,7 +41,7 @@ const MODULES: Partial<Record<ModuleName, OmpModule>> = {
   editor,
   exit: exitTool,
   handoff,
-  queue,
+  later,
   quick,
   respond,
   save,

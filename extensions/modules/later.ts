@@ -1,14 +1,14 @@
 /**
- * Queue — park prompts while the agent is busy; they fire one at a time once it goes idle.
+ * Later — park prompts while the agent is busy; they fire one at a time once it goes idle.
  *
- * State persists per session under <agentDir>/queue/ and is re-keyed on session start, switch, and branch (the host
+ * State persists per session under <agentDir>/later/ and is re-keyed on session start, switch, and branch (the host
  * emits session_switch — not session_start — for /new, /resume, fork, and handoff). A generation counter guards the
- * delayed fire so a queued prompt is never injected into a session the user left. An above-editor widget shows the
+ * delayed fire so a parked prompt is never injected into a session the user left. An above-editor widget shows the
  * pending count and head item.
  *
- * /queue [text] | /q — queue a prompt; bare opens the manager · /queue-manager on|off|pause|resume | /qm — capture
- * mode (queue every interactive prompt instead of sending), pause/resume, or the manager (edit/skip/remove).
- * Disable: "modules": { "queue": false }.
+ * /later [text] | /l — park a prompt; bare opens the manager · /later-manager on|off|pause|resume | /lm — capture
+ * mode (park every interactive prompt instead of sending), pause/resume, or the manager (edit/skip/remove).
+ * Disable: "modules": { "later": false }.
  */
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
@@ -19,22 +19,22 @@ import { join } from "node:path";
 type Item = { text: string; skipped: boolean };
 type State = { items: Item[]; paused: boolean; capture: boolean };
 
-const WIDGET_ID = "yuri-queue";
+const WIDGET_ID = "yuri-later";
 const MAX_LABEL = 60; // truncated task text length in widget/manager
 const FIRE_DELAY_MS = 1_000; // let follow-ups/steers land before firing the next item
 
-export default function queue(pi: ExtensionAPI): void {
+export default function later(pi: ExtensionAPI): void {
 	const state: State = { items: [], paused: false, capture: false };
 	let sessionFile: string | undefined;
 	// Bumped on every session re-key; scheduled fires compare against it so a
-	// queued prompt is never injected into a session the user left.
+	// parked prompt is never injected into a session the user left.
 	let generation = 0;
 
-	// ---- persistence: per session, under <agentDir>/queue/<file>.json (omp) or
-	// ~/.config/pi-yuri-extensions/queue/ (pi, which has no agent dir) ----
+	// ---- persistence: per session, under <agentDir>/later/<file>.json (omp) or
+	// ~/.config/pi-yuri-extensions/later/ (pi, which has no agent dir) ----
 	const ompAgentDir = (pi as { pi?: { settings?: { getAgentDir?: () => string } } }).pi?.settings?.getAgentDir?.();
-	const queueDir = ompAgentDir ? join(ompAgentDir, "queue") : join(homedir(), ".config", "pi-yuri-extensions", "queue");
-	const stateFile = () => (sessionFile ? join(queueDir, `${sessionFile.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`) : undefined);
+	const laterDir = ompAgentDir ? join(ompAgentDir, "later") : join(homedir(), ".config", "pi-yuri-extensions", "later");
+	const stateFile = () => (sessionFile ? join(laterDir, `${sessionFile.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`) : undefined);
 
 	const load = () => {
 		const file = stateFile();
@@ -57,7 +57,7 @@ export default function queue(pi: ExtensionAPI): void {
 		const file = stateFile();
 		if (!file) return;
 		try {
-			mkdirSync(queueDir, { recursive: true });
+			mkdirSync(laterDir, { recursive: true });
 			writeFileSync(file, JSON.stringify(state), "utf8");
 		} catch {
 			// best effort
@@ -79,7 +79,7 @@ export default function queue(pi: ExtensionAPI): void {
 			render(width: number): string[] {
 				const pending = state.items.filter((i) => !i.skipped).length;
 				const head =
-					`Queue ${pending}/${state.items.length}` + (state.capture ? " ● capture" : "") + (state.paused ? " ⏸ paused" : "");
+					`Later ${pending}/${state.items.length}` + (state.capture ? " ● capture" : "") + (state.paused ? " ⏸ paused" : "");
 				const lines: string[] = [truncateToWidth(theme.fg("accent", ` ${head} `), width)];
 				state.items.forEach((item, i) => {
 					const label = truncate(item.text);
@@ -119,7 +119,7 @@ export default function queue(pi: ExtensionAPI): void {
 	// session_switch/session_branch: the host emits session_switch (not
 	// session_start) for /new, /resume, fork, and handoff, so keying only on
 	// session_start would keep editing the previous session's file and could
-	// fire a queued prompt into a session the user left.
+	// fire a parked prompt into a session the user left.
 	const rekeySession = (ctx: ExtensionContext) => {
 		generation++;
 		const file = ctx.sessionManager.getSessionFile();
@@ -148,10 +148,10 @@ export default function queue(pi: ExtensionAPI): void {
 	}
 
 	// No "agent_settled" on omp; agent_end + a short delay approximates it:
-	// the run finished and queued steers/follow-ups have landed.
+	// the run finished and parked steers/follow-ups have landed.
 	pi.on("agent_end", (_event, ctx) => scheduleFire(ctx));
 
-	// capture mode: queue every interactive prompt instead of sending it.
+	// capture mode: park every interactive prompt instead of sending it.
 	// Widened signature: the {handled} result is omp-specific; pi absorbs the return.
 	// pi uses { action: "handled" }; omp uses { handled: boolean }. The unified
 	// handler satisfies both shapes; the registration is cast through unknown
@@ -170,14 +170,14 @@ export default function queue(pi: ExtensionAPI): void {
 		state.items.push({ text, skipped: false });
 		save();
 		refreshWidget(ctx);
-		ctx.ui.notify(`Captured (${state.items.length} in queue)`, "info");
+		ctx.ui.notify(`Captured (${state.items.length} parked)`, "info");
 		scheduleFire(ctx);
 		return handled(true);
 	});
 
 	const openManager = async (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) {
-			ctx.ui.notify("The queue manager requires interactive mode", "error");
+			ctx.ui.notify("The later manager requires interactive mode", "error");
 			return;
 		}
 		await ctx.ui.custom<void>((_tui, theme, _kb, done) => new ManagerComponent(state, theme, done));
@@ -186,7 +186,7 @@ export default function queue(pi: ExtensionAPI): void {
 		tryFire(ctx, generation);
 	};
 
-	const addToQueue = async (args: string, ctx: ExtensionContext) => {
+	const addToLater = async (args: string, ctx: ExtensionContext) => {
 		const text = args.trim();
 		if (!text) {
 			await openManager(ctx);
@@ -195,19 +195,20 @@ export default function queue(pi: ExtensionAPI): void {
 		state.items.push({ text, skipped: false });
 		save();
 		refreshWidget(ctx);
-		ctx.ui.notify(`Queued (${state.items.length} in queue)`, "info");
+		ctx.ui.notify(`Parked (${state.items.length} parked)`, "info");
 		tryFire(ctx, generation);
 	};
 
-	pi.registerCommand("queue", {
-		description: "Add a prompt to the queue, or open the manager when called bare",
-		handler: addToQueue,
+	pi.registerCommand("later", {
+		description: "Park a prompt for later, or open the manager when called bare",
+		handler: addToLater,
 	});
 
-	pi.registerCommand("q", {
-		description: "Alias for /queue",
-		handler: addToQueue,
+	pi.registerCommand("l", {
+		description: "Alias for /later",
+		handler: addToLater,
 	});
+
 
 	const managerHandler = async (args: string, ctx: ExtensionContext) => {
 		const sub = args.trim().toLowerCase();
@@ -215,14 +216,14 @@ export default function queue(pi: ExtensionAPI): void {
 			state.paused = true;
 			save();
 			refreshWidget(ctx);
-			ctx.ui.notify("Queue paused", "info");
+			ctx.ui.notify("Later paused", "info");
 			return;
 		}
 		if (sub === "resume") {
 			state.paused = false;
 			save();
 			refreshWidget(ctx);
-			ctx.ui.notify("Queue resumed", "info");
+			ctx.ui.notify("Later resumed", "info");
 			tryFire(ctx, generation);
 			return;
 		}
@@ -230,7 +231,7 @@ export default function queue(pi: ExtensionAPI): void {
 			state.capture = sub === "on";
 			save();
 			refreshWidget(ctx);
-			ctx.ui.notify(state.capture ? "Capture mode on: all messages queue" : "Capture mode off", "info");
+			ctx.ui.notify(state.capture ? "Capture mode on: all messages park for later" : "Capture mode off", "info");
 			return;
 		}
 		await openManager(ctx);
@@ -242,13 +243,13 @@ export default function queue(pi: ExtensionAPI): void {
 		handler: managerHandler,
 	};
 
-	pi.registerCommand("queue-manager", {
-		description: "Manage the queue: on/off capture, pause, resume, or open the manager",
+	pi.registerCommand("later-manager", {
+		description: "Manage parked prompts: on/off capture, pause, resume, or open the manager",
 		...managerOptions,
 	});
 
-	pi.registerCommand("qm", {
-		description: "Alias for /queue-manager",
+	pi.registerCommand("lm", {
+		description: "Alias for /later-manager",
 		...managerOptions,
 	});
 }
@@ -330,7 +331,7 @@ class ManagerComponent {
 		const lines: string[] = [""];
 
 		const pending = items.filter((i) => !i.skipped).length;
-		const heading = ` Queue Manager  ${pending}/${items.length}${this.state.capture ? "  ● capture" : ""}${this.state.paused ? "  ⏸ paused" : ""} `;
+		const heading = ` Later Manager  ${pending}/${items.length}${this.state.capture ? "  ● capture" : ""}${this.state.paused ? "  ⏸ paused" : ""} `;
 		lines.push(
 			truncateToWidth(
 				th.fg("borderMuted", "─".repeat(3)) +
@@ -342,7 +343,7 @@ class ManagerComponent {
 		lines.push("");
 
 		if (items.length === 0) {
-			lines.push(truncateToWidth(`  ${th.fg("dim", "Queue is empty.")}`, width));
+			lines.push(truncateToWidth(`  ${th.fg("dim", "Nothing parked for later.")}`, width));
 		} else {
 			items.forEach((item, i) => {
 				const sel = i === this.selected;

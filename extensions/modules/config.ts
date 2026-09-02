@@ -14,7 +14,7 @@ export const MODULE_NAMES = [
   "ctx",
   "exit",
   "handoff",
-  "queue",
+  "later",
   "quick",
   "respond",
   "statusline",
@@ -37,7 +37,7 @@ export type ModuleConfig = {
   events?: Record<string, boolean>;
 };
 
-export const STATUSLINE_SEGMENT_NAMES = ["contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
+export const STATUSLINE_COMPONENT_NAMES = ["indicator", "contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
 export const STATUSLINE_COLORS = [
   "accent",
   "success",
@@ -48,36 +48,82 @@ export const STATUSLINE_COLORS = [
   "statusLineCost",
 ] as const;
 
-export const STATUSLINE_DEFAULT_SEGMENTS: StatuslineSegment[] = [
-  { name: "contextLimit" },
-  { name: "budget", color: "statusLineSpend" },
-  { name: "sessionCost" },
-  { name: "aws", color: "warning" },
-  { name: "kube", color: "success" },
-];
-
-export type StatuslineSegmentName = (typeof STATUSLINE_SEGMENT_NAMES)[number];
+export type StatuslineComponentName = (typeof STATUSLINE_COMPONENT_NAMES)[number];
 export type StatuslineColor = (typeof STATUSLINE_COLORS)[number];
 
-/** Toolkit top-level fields (see modules/budget, modules/ctx, omp/modules/continue). */
-export interface StatuslineSegment {
-  name: (typeof STATUSLINE_SEGMENT_NAMES)[number];
-  color?: (typeof STATUSLINE_COLORS)[number];
-  /** false hides the segment from the footer. */
+/** statusline.prefix: "state" renders the event-driven indicator glyph, "none" no prefix, a literal string as-is. */
+export type StatuslinePrefix = "state" | "none" | (string & {});
+
+/** Per-component config block; unknown extra keys are tolerated for forward compatibility. */
+export interface StatuslineComponentConfig {
   enabled?: boolean;
+  color?: StatuslineColor | "auto";
 }
+
+export interface StatuslineConfig {
+  /** "state" (default) | "none" | literal prefix glyph. */
+  prefix?: StatuslinePrefix;
+  /** Render order; every name must be a registered component. */
+  order?: StatuslineComponentName[];
+  /** Per-component blocks keyed by component name. */
+  components?: Partial<Record<StatuslineComponentName, Record<string, unknown>>>;
+}
+
+export const STATUSLINE_DEFAULT_ORDER: StatuslineComponentName[] = [
+  "indicator",
+  "contextLimit",
+  "budget",
+  "sessionCost",
+  "aws",
+  "kube",
+];
+
+
+/**
+ * Normalize a raw `statusline` config value: unknown/non-object → undefined; legacy `segments` array →
+ * `order` + per-component `{enabled, color}` (both runtimes call this on read, so the rest of the code
+ * only ever sees the new shape). Already-migrated blocks pass through untouched.
+ */
+export function migrateStatusline(raw: unknown): StatuslineConfig | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const input = raw as Record<string, unknown> & Partial<StatuslineConfig>;
+  const migrated: StatuslineConfig = {
+    prefix: input.prefix,
+    order: input.order ? [...input.order] : undefined,
+    components: input.components ? { ...input.components } : undefined,
+  };
+  if (Array.isArray(input.segments)) {
+    const order = migrated.order ?? [];
+    const components = { ...(migrated.components ?? {}) };
+    for (const segment of input.segments) {
+      if (typeof segment !== "object" || segment === null) continue;
+      const { name, color, enabled } = segment as { name?: unknown; color?: unknown; enabled?: unknown };
+      if (typeof name !== "string" || !STATUSLINE_COMPONENT_NAMES.includes(name as StatuslineComponentName)) continue;
+      if (!order.includes(name as StatuslineComponentName)) order.push(name as StatuslineComponentName);
+      components[name as StatuslineComponentName] = {
+        ...components[name as StatuslineComponentName],
+        ...(typeof color === "string" ? { color } : {}),
+        ...(enabled === false ? { enabled: false } : {}),
+      };
+    }
+    migrated.order = order;
+    migrated.components = components;
+  }
+  if (!migrated.prefix && !migrated.order?.length && !migrated.components && !Array.isArray(input.segments)) return undefined;
+  return migrated;
+}
+
 
 export type YuriExtensionsConfig = {
   modules?: Partial<Record<ModuleName, ModuleConfig>>;
   /** budget module: USD spend gates persisted globally. */
   budgetGates?: number[];
-  /** ctx module: artificial context cap in tokens. */
+  statusline?: StatuslineConfig;
   ctxLimit?: number;
   /** ctx module: what happens at the cap. */
   ctxLimitAction?: "compact" | "stop";
   /** continue module: prompt re-sent after automatic maintenance compaction. */
   continueAfterCompactPrompt?: string;
-  statusline?: { segments?: StatuslineSegment[] };
 };
 export const DEFAULT_CONFIG: Required<Pick<YuriExtensionsConfig, "modules">> & Partial<YuriExtensionsConfig> = {
   modules: {
@@ -95,7 +141,7 @@ export const DEFAULT_CONFIG: Required<Pick<YuriExtensionsConfig, "modules">> & P
     ctx: { enabled: true },
     exit: { enabled: true },
     handoff: { enabled: true },
-    queue: { enabled: true },
+    later: { enabled: true },
     quick: { enabled: true },
     respond: { enabled: true },
     statusline: { enabled: true },

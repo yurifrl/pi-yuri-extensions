@@ -10,7 +10,7 @@ Your personal **pi package hub**.
 
 The package has one feature vocabulary across Pi and OMP. The filesystem mirrors the integration boundary: `extensions/pi/` contains Pi-only entrypoints, `extensions/omp/` contains OMP-only entrypoints, and `extensions/modules/` owns runtime-neutral feature packages usable by both.
 
-Shared modules (both runtimes): `aws`, `budget`, `checkpoint`, `coderabbit`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `save`, `session-id`, `statusline`, `thinking`. Single-file modules live flat as `extensions/modules/<name>.ts`; only multi-file ones (`aws/`, `coderabbit/`, `checkpoint/`, `statusline/`, plus shared `lib/`) get a folder. OMP-exclusive (depends on omp events/agent-dir): `continue`, `editor`, `envs`, `nudge`, `notifications`, `update`, `working`. Pi-exclusive: `copy-slack`, `draft`, `e`, `git`, `greetings`, `helpy`, `memwatch`, `pi-beads`, `yes`, `conductor`.
+Shared modules (both runtimes): `aws`, `budget`, `checkpoint`, `coderabbit`, `ctx`, `exit`, `handoff`, `later`, `quick`, `respond`, `save`, `session-id`, `statusline`, `thinking`. Single-file modules live flat as `extensions/modules/<name>.ts`; only multi-file ones (`aws/`, `coderabbit/`, `checkpoint/`, `statusline/`, plus shared `lib/`) get a folder. OMP-exclusive (depends on omp events/agent-dir): `continue`, `editor`, `envs`, `nudge`, `notifications`, `update`, `working`. Pi-exclusive: `copy-slack`, `draft`, `e`, `git`, `greetings`, `helpy`, `memwatch`, `pi-beads`, `yes`, `conductor`.
 
 Checkpoint is the model feature: `extensions/modules/checkpoint/core.ts` is runtime-neutral, `pi.ts` and `omp.ts` translate only their own runtime APIs, and `skills/checkpoint/SKILL.md` is the shared workflow. Pi loads `extensions/pi/index.ts`; OMP loads `extensions/omp/index.ts`. Shared modules read/write the toolkit top-level fields (`budgetGates`, `ctxLimit`, `ctxLimitAction`, `continueAfterCompactPrompt`, `statusline`) through the runtime-agnostic config store in `extensions/modules/config.ts`; each runtime points it at its own global `pi-yuri-extensions.json`.
 
@@ -42,13 +42,12 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
   "ctxLimit": 200000,
   "ctxLimitAction": "compact",
   "statusline": {
-    "segments": [
-      { "name": "contextLimit" },
-      { "name": "budget", "color": "statusLineSpend" },
-      { "name": "sessionCost", "color": "accent" },
-      { "name": "aws", "color": "warning" },
-      { "name": "kube", "color": "success" }
-    ]
+    "prefix": "state",
+    "order": ["indicator", "contextLimit", "budget", "sessionCost", "aws", "kube"],
+    "components": {
+      "budget": { "color": "statusLineSpend" },
+      "kube": { "refreshMs": 120000 }
+    }
   }
 }
 ```
@@ -66,8 +65,7 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 | `budgetGates` | `[]` | Toolkit top-level: USD spend gates applied to every session; set via `/budget`. |
 | `ctxLimit` / `ctxLimitAction` | unset / `compact` | Toolkit top-level: artificial context cap and the action at the cap; set via `/ctx`. |
 | `continueAfterCompactPrompt` | built-in | Toolkit top-level: prompt re-sent after automatic maintenance compaction. |
-| `statusline.segments` | all five | Toolkit top-level: status widget segments, colors, and order. |
-
+| `statusline` | all | Toolkit top-level: `prefix` (`state` glyph / `none` / literal), `order` (component names), `components.<name>` per-component blocks (`enabled`, `color`, plus component-specific fields). Legacy `segments` arrays are migrated on read. |
 
 `nudge`, `envs`, `editor`, and `session-id` take no options. `envs` profile switching is runtime-only via `/envs work|personal|all|status`.
 
@@ -123,7 +121,7 @@ Pi-side toggles (`extensions` map, all OFF by default):
 - `handoff`
 - `helpy`
 - `memwatch`
-- `queue`
+- `later`
 - `quick`
 - `respond`
 - `session-id`
@@ -145,7 +143,7 @@ OMP-side modules (`modules` map, all ON by default):
 - `handoff`
 - `nudge`
 - `notifications`
-- `queue`
+- `later`
 - `quick`
 - `respond`
 - `save`
@@ -165,7 +163,7 @@ Use:
 
 It prints current toggle status and config path.
 
-OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`, `/aws`, plus the toolkit set — `/budget`, `/ctx`, `/handoff`, `/thinking`, `/queue` (`/q`), `/queue-manager` (`/qm`), `/quick-oppus` (`/qo`), `/quick-gpt` (`/qg`), `/respond`, `/coderabbit`, `/update` — and the model-callable `exit` tool.
+OMP-side commands (loaded by default): `/nudge`, `/notifications`, `/envs`, `/checkpoint`, `/save`, `/aws`, plus the toolkit set — `/budget`, `/ctx`, `/handoff`, `/thinking`, `/later` (`/l`), `/later-manager` (`/lm`), `/quick-oppus` (`/qo`), `/quick-gpt` (`/qg`), `/respond`, `/coderabbit`, `/update` — and the model-callable `exit` tool.
 
 ### `checkpoint` (Pi + OMP)
 

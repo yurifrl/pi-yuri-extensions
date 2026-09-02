@@ -1,161 +1,170 @@
 /**
  * Statusline — one-row status widget above the editor (omp's footer is untouched).
  *
- * Segments: context usage against the /ctx cap, AI Hub daily budget vs limit, session cost with per-message average,
- * AWS profile (env), Kubernetes context (kubectl). Gateway budget/pricing refresh every 2 min via a live-context slot
- * so refreshes follow the current session; turn ends redraw immediately. Config is cached for the whole session —
- * render never touches the fs. All collection is best-effort: missing env, CLI, or key just hides the segment.
+ * Architecture: self-registering components (components.ts barrel) render in configured order; index.ts is
+ * only lifecycle plumbing — parse each component's config block once per session, start them under per-
+ * component hosts, fan session events, join prefix + row. Render never touches the fs. Config comes from
+ * pi-yuri-extensions.json `statusline`; see .agents/plan/statusline-modular-refactor.md.
  *
- * Rendering lives in view.ts; segments/order/colors configure via pi-yuri-extensions.json. Requires AIHUB_API_KEY for
- * the budget segment. Disable: "modules": { "statusline": false }.
+ * prefix: "state" renders the event-driven indicator glyph, "none" no prefix, any other string verbatim.
+ * Disable the whole widget: "modules": { "statusline": false }.
  */
-import { truncateToWidth } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { readSharedConfig, type YuriExtensionsConfig } from "../config.ts";
-import { renderStatusline, type StatuslineBudget, type StatuslineTheme } from "./view.ts";
-import { sessionSpend, type SessionPrice } from "../budget.ts";
+import { readSharedConfig, STATUSLINE_DEFAULT_ORDER, type StatuslineComponentName, type StatuslineConfig } from "../config.ts";
+import "./components.ts";
+import { getComponent, registeredComponentNames } from "./registry.ts";
+import { renderStatusRow } from "./view.ts";
+import type { ComponentHost, HostAggregate, StatuslineTheme } from "./types.ts";
+import { publishIndicatorHost } from "./components/indicator.ts";
+import { publishContextSource } from "./components/context-limit.ts";
+import { publishSessionCostContext } from "./components/session-cost.ts";
 
-const GATEWAY_URL = "https://ai-llm-gateway.fbr.land";
-const REFRESH_MS = 120_000;
+type ParsedConfig = { enabled: boolean } & Record<string, unknown>;
 
-const STATUS_ICONS = ["󰄾", "󰔟", "󰘍", "󰆍", "󰙨", "󰎆", "󰊠", "󰅐"] as const;
-
-type Price = SessionPrice;
-
-type State = {
-	budget?: StatuslineBudget;
-	prices: Record<string, Price>;
-	aws?: string;
-	kube?: string;
-};
-
-async function refresh(state: State, pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
-	state.aws = process.env.AWS_VAULT || process.env.AWS_PROFILE || process.env.AWS_DEFAULT_PROFILE || undefined;
-	try {
-		const result = await pi.exec("kubectl", ["config", "current-context"], { cwd: ctx.cwd, timeout: 5_000 });
-		state.kube = result.code === 0 ? result.stdout.trim() || undefined : undefined;
-	} catch {
-		state.kube = undefined;
-	}
-
-	const apiKey = process.env.AIHUB_API_KEY;
-	if (!apiKey) return;
-	try {
-		const [usage, models] = await Promise.all([
-			fetch(`${GATEWAY_URL}/v1/me/usage`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(5_000) }),
-			fetch(`${GATEWAY_URL}/v1/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(5_000) }),
-		]);
-		if (usage.ok) {
-			const data = (await usage.json()) as { daily_budget?: { spent_usd?: number; limit_usd?: number; limit_enabled?: boolean } };
-			if (typeof data.daily_budget?.spent_usd === "number" && typeof data.daily_budget.limit_usd === "number") {
-				state.budget = {
-					spentUsd: data.daily_budget.spent_usd,
-					limitUsd: data.daily_budget.limit_usd,
-					limitEnabled: data.daily_budget.limit_enabled === true,
-				};
-			}
-		}
-		if (models.ok) {
-			const data = (await models.json()) as {
-				data?: {
-					id?: string;
-					pricing?: { prompt?: number; completion?: number; input_cache_read?: number; input_cache_write?: number };
-				}[];
-			};
-			state.prices = {};
-			for (const model of data.data ?? []) {
-				if (!model.id || !model.pricing) continue;
-				state.prices[model.id] = {
-					input: (model.pricing.prompt ?? 0) * 1_000_000,
-					output: (model.pricing.completion ?? 0) * 1_000_000,
-					cacheRead: (model.pricing.input_cache_read ?? 0) * 1_000_000,
-					cacheWrite: (model.pricing.input_cache_write ?? 0) * 1_000_000,
-				};
-			}
-		}
-	} catch {
-		// Retain the last successful gateway snapshot.
-	}
-}
+const parsedConfigs = new Map<string, ParsedConfig>();
 
 export default function statusline(pi: ExtensionAPI): void {
-	const state: State = { prices: {} };
-	let statusIcon = 0;
-	let redraw: (() => void) | undefined;
-	// C22: config reads (fs + JSON.parse + validation) must not run per TUI frame.
-	// Cache for the whole session; invalidated on session_start (the only place this
-	// module's config-affecting fields can change through the plugin's own commands).
-	let cachedConfig: YuriExtensionsConfig | undefined;
-	const configCache = (): YuriExtensionsConfig => (cachedConfig ??= readSharedConfig());
-
-	function sessionCostText(ctx: ExtensionContext): string {
-		const spend = sessionSpend(ctx, state.prices);
-		const average = spend.messages > 0 ? spend.total / spend.messages : 0;
-		return `󰔛 $${spend.total < 0.01 ? spend.total.toFixed(4) : spend.total.toFixed(2)} · ~$${average < 0.01 ? average.toFixed(4) : average.toFixed(2)}/msg`;
-	}
-
+	let redrawing: (() => void) | undefined;
+	let teardowns: (() => void)[] = [];
 	let latestCtx: ExtensionContext | undefined;
-	// The 120s interval reads this slot instead of a captured ctx, so refreshes always
-	// target the current session (a session_start capture would survive session_switch).
-	const setLatestCtx = (ctx: ExtensionContext) => {
-		latestCtx = ctx;
+	let ctxLimit: number | undefined;
+	let order: StatuslineComponentName[] = STATUSLINE_DEFAULT_ORDER;
+	let prefixCfg: NonNullable<StatuslineConfig["prefix"]> = "state";
+	let theme: StatuslineTheme | undefined;
+	let working = false;
+	let refreshingCount = 0;
+	let attentionCount = 0;
+
+	const ctxSlot = (): ExtensionContext | undefined => latestCtx;
+
+	const aggregate = (): HostAggregate => {
+		const tokens = latestCtx?.getContextUsage()?.tokens ?? undefined;
+		return {
+			working,
+			refreshing: refreshingCount > 0,
+			attention: attentionCount > 0,
+			pressurePercent: tokens !== undefined && ctxLimit ? (tokens / ctxLimit) * 100 : undefined,
+		};
 	};
 
-	function update(): void {
-		const ctx = latestCtx;
-		if (!ctx) return;
-		void refresh(state, pi, ctx).then(() => redraw?.());
+	const hostFor = (name: string): ComponentHost => ({
+		pi,
+		ctx: ctxSlot,
+		redraw: () => redrawing?.(),
+		setStatus(state) {
+			if (state === "refreshing") refreshingCount += 1;
+			else refreshingCount = Math.max(0, refreshingCount - 1);
+			if (state === "attention") attentionCount += 1;
+			else attentionCount = Math.max(0, attentionCount - 1);
+			redrawing?.();
+		},
+		aggregate,
+	});
+
+	function parseAllConfigs(): void {
+		const shared = readSharedConfig();
+		const statuslineConfig = shared.statusline ?? {};
+		ctxLimit = shared.ctxLimit;
+		prefixCfg = statuslineConfig.prefix ?? "state";
+		order = statuslineConfig.order ?? STATUSLINE_DEFAULT_ORDER;
+		for (const name of order) {
+			const component = getComponent(name);
+			if (!component) {
+				throw new Error(`statusline.order references unknown component '${name}' (registered: ${registeredComponentNames().join(", ")})`);
+			}
+			parsedConfigs.set(name, component.parseConfig(statuslineConfig.components?.[name], shared));
+		}
 	}
 
+	function startComponents(): void {
+		publishIndicatorHost(hostFor("indicator"));
+		for (const name of order) {
+			const component = getComponent(name);
+			const cfg = parsedConfigs.get(name);
+			if (!component || !cfg?.enabled) continue;
+			teardowns.push(component.start(hostFor(name), cfg));
+		}
+	}
+
+	function stopComponents(): void {
+		for (const teardown of teardowns) teardown();
+		teardowns = [];
+		working = false;
+		refreshingCount = 0;
+		attentionCount = 0;
+	}
+
+	function renderSegments(): string[] {
+		if (!theme) return [];
+		const segments: string[] = [];
+		for (const name of order) {
+			if (name === "indicator") continue; // Prefix-only; renderPrefix renders it.
+			const component = getComponent(name);
+			const cfg = parsedConfigs.get(name);
+			if (!component || !cfg?.enabled) continue;
+			const rendered = component.render(cfg, theme);
+			if (rendered) segments.push(rendered);
+		}
+		return segments;
+	}
+
+	function renderPrefix(): string {
+		if (prefixCfg === "none") return "";
+		if (prefixCfg !== "state") return `${prefixCfg} `;
+		if (!theme) return "";
+		const cfg = parsedConfigs.get("indicator");
+		if (!cfg?.enabled) return "";
+		const rendered = getComponent("indicator")?.render(cfg, theme);
+		return rendered ? `${rendered} ` : "";
+	}
+
+
 	pi.on("session_start", (_event, ctx) => {
-		// Fresh config per session; cached for the whole session so render() never touches the fs.
-		cachedConfig = undefined;
+		parseAllConfigs();
+		latestCtx = ctx;
+		// Publish live-context slots the pure component render() fns read; republished on every session event.
+		publishContextSource(ctxSlot, ctxLimit);
+		publishSessionCostContext(ctxSlot);
 		if (!ctx.hasUI) return;
-		setLatestCtx(ctx);
 		ctx.ui.setWidget(
-			"toolkit-statusline",
-			(tui, theme) => {
-				redraw = () => tui.requestRender();
+			"yuri-statusline",
+			(tui, widgetTheme) => {
+				theme = widgetTheme as unknown as StatuslineTheme;
+				redrawing = () => tui.requestRender();
 				return {
 					invalidate() {},
 					render(width: number): string[] {
-						const active = latestCtx;
-						if (!active) return [];
-						const line = renderStatusline(
-							configCache(),
-							{
-								contextTokens: active.getContextUsage()?.tokens ?? undefined,
-								budget: state.budget,
-								cost: sessionCostText(active),
-								aws: state.aws,
-								kube: state.kube,
-							},
-							theme as unknown as StatuslineTheme,
-						);
-						return [`${STATUS_ICONS[statusIcon]}   ${truncateToWidth(line, Math.max(0, width - 3))}`];
+						const prefix = renderPrefix();
+						const prefixWidth = prefix ? [...prefix].length : 0;
+						const inner = renderStatusRow(renderSegments(), Math.max(0, width - prefixWidth));
+						if (inner.length === 0) return [];
+						return [`${prefix}${inner[0]}`];
 					},
 				};
 			},
 			{ placement: "aboveEditor" },
 		);
-		update();
-		setInterval(update, REFRESH_MS);
-		setInterval(() => {
-			statusIcon = (statusIcon + 1) % STATUS_ICONS.length;
-			redraw?.();
-		}, 2_000);
+		startComponents();
 	});
-	// omp-only event: refreshes follow the switched-to session. Widened so the
-	// registration typechecks against pi's narrower event map.
-	(pi as unknown as { on(event: string, handler: (event: never, ctx: ExtensionContext) => void): void }).on(
-		"session_switch",
-		(_event, ctx) => {
-			setLatestCtx(ctx);
-			update();
-		},
-	);
+	// omp-only event: lifecycle restarts follow the switched-to session. Widened so the registration
+	// typechecks against pi's narrower event map (same pattern as modules/budget.ts).
+	const widenedPi = pi as unknown as { on(event: string, handler: (event: never, ctx: ExtensionContext) => void): void };
+	widenedPi.on("session_switch", (_event, ctx) => {
+		latestCtx = ctx;
+		publishContextSource(ctxSlot, ctxLimit);
+		publishSessionCostContext(ctxSlot);
+		stopComponents();
+		if (ctx.hasUI) startComponents();
+	});
+	pi.on("turn_start", () => {
+		if (!working) {
+			working = true;
+			redrawing?.();
+		}
+	});
 	pi.on("turn_end", (_event, ctx) => {
-		setLatestCtx(ctx);
-		redraw?.();
+		latestCtx = ctx;
+		working = false;
+		redrawing?.();
 	});
 }

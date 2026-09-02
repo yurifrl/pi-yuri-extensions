@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
 import { homedir } from "node:os";
-import { setConfigStore, type YuriExtensionsConfig } from "../modules/config.ts";
+import { migrateStatusline, setConfigStore, type YuriExtensionsConfig } from "../modules/config.ts";
 import { readPiYuConfigFile } from "./config.ts";
 
 type ExtensionModule = { default?: (pi: ExtensionAPI) => void };
@@ -36,7 +36,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   ctx: () => import("../modules/ctx.ts"),
   exit: () => import("../modules/exit.ts"),
   handoff: () => import("../modules/handoff.ts"),
-  queue: () => import("../modules/queue.ts"),
+  later: () => import("../modules/later.ts"),
   quick: () => import("../modules/quick.ts"),
   respond: () => import("../modules/respond.ts"),
   statusline: () => import("../modules/statusline/index.ts"),
@@ -51,7 +51,11 @@ setConfigStore({
   read(): YuriExtensionsConfig {
     if (!existsSync(SHARED_CONFIG_PATH)) return {};
     try {
-      return JSON.parse(readFileSync(SHARED_CONFIG_PATH, "utf8")) as YuriExtensionsConfig;
+      const raw = JSON.parse(readFileSync(SHARED_CONFIG_PATH, "utf8")) as Record<string, unknown>;
+      return {
+        ...raw,
+        statusline: migrateStatusline(raw.statusline),
+      } as YuriExtensionsConfig;
     } catch {
       return {};
     }
