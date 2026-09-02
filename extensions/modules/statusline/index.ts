@@ -67,12 +67,14 @@ export default function statusline(pi: ExtensionAPI): void {
 		ctxLimit = shared.ctxLimit;
 		prefixCfg = statuslineConfig.prefix ?? "state";
 		order = statuslineConfig.order ?? STATUSLINE_DEFAULT_ORDER;
-		for (const name of order) {
+		const names = new Set<string>(order);
+		names.add("indicator"); // prefix always has config even if order omits it
+		for (const name of names) {
 			const component = getComponent(name);
 			if (!component) {
 				throw new Error(`statusline.order references unknown component '${name}' (registered: ${registeredComponentNames().join(", ")})`);
 			}
-			parsedConfigs.set(name, component.parseConfig(statuslineConfig.components?.[name], shared));
+			parsedConfigs.set(name, component.parseConfig(statuslineConfig.components?.[name as StatuslineComponentName], shared));
 		}
 	}
 
@@ -112,9 +114,10 @@ export default function statusline(pi: ExtensionAPI): void {
 		if (prefixCfg === "none") return "";
 		if (prefixCfg !== "state") return `${prefixCfg} `;
 		if (!theme) return "";
+		const component = getComponent("indicator");
 		const cfg = parsedConfigs.get("indicator");
-		if (!cfg?.enabled) return "";
-		const rendered = getComponent("indicator")?.render(cfg, theme);
+		if (!component || !cfg?.enabled) return "";
+		const rendered = component.render(cfg, theme);
 		return rendered ? `${rendered} ` : "";
 	}
 

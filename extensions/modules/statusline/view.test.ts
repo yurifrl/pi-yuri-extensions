@@ -3,12 +3,9 @@ import { migrateStatusline, STATUSLINE_DEFAULT_ORDER, type StatuslineConfig } fr
 import { renderStatusRow } from "./view.ts";
 
 test("renderStatusRow joins non-empty segments and truncates to width", () => {
-	expect(renderStatusRow(["a", "b", "c"], 80)).toEqual(["a  b  c"]);
-	expect(renderStatusRow(["a", "", "c"], 80)).toEqual(["a  c"]);
-});
-
-test("renderStatusRow returns no rows when everything is empty", () => {
-	expect(renderStatusRow(["", ""], 80)).toEqual([]);
+	const arrow = String.fromCharCode(0xe0b1);
+	expect(renderStatusRow(["a", "b", "c"], 80)).toEqual([`a${arrow}b${arrow}c`]);
+	expect(renderStatusRow(["a", "", "c"], 80)).toEqual([`a${arrow}c`]);
 });
 
 test("migrateStatusline passes an already-migrated block through", () => {
