@@ -3,7 +3,7 @@
 ## 2026-09-01 Port @fbr/toolkit into shared + omp modules
 
 ### Added
-- Shared runtime-neutral modules ported from `@fbr/toolkit` in the omp-marketplace repo. Flat files `extensions/modules/<name>.ts` for `budget`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `thinking`; folders only where the module has multiple files (`coderabbit/` + `index.test.ts`, `statusline/` + `view.ts`). `omp/awsLoginConfig.ts` relocated to `modules/lib/awsLoginConfig.ts` (runtime-neutral helper for the shared aws module).
+- Shared runtime-neutral modules ported from `@fbr/toolkit` in the omp-marketplace repo. Flat files `extensions/modules/<name>.ts` for `budget`, `ctx`, `exit`, `handoff`, `queue`, `quick`, `respond`, `thinking`; folders only where the module has multiple files (`coderabbit/` + `index.test.ts`, `statusline/` + `view.ts`). `omp/awsLoginConfig.ts` folded into `modules/aws/` next to its only consumer: `aws/` now holds `index.ts`, `awsLoginConfig.ts`, `bedrock-auth.ts`, `index.test.ts` (the test moved from `modules/aws.test.ts`, its self-reference retargeted).
 - OMP-only modules: `extensions/omp/modules/continue.ts` (needs the omp auto-compaction event bracket) and `extensions/omp/modules/update.ts` (omp plugin-store paths).
 - Runtime-agnostic config store in `extensions/modules/config.ts` (`setConfigStore`/`readSharedConfig`/`writeSharedConfig`): omp points it at `~/.omp/agent/extensions/pi-yuri-extensions.json`, pi at `~/.pi/agent/extensions/pi-yuri-extensions.json`. Modules never touch the filesystem directly.
 - Toolkit top-level fields on `YuriExtensionsConfig`: `budgetGates`, `ctxLimit`, `ctxLimitAction`, `continueAfterCompactPrompt`, `statusline` (+ statusline constants/types).

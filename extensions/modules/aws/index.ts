@@ -4,8 +4,8 @@ import { spawn } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readPiYuConfig } from "./lib/config.ts";
-import { readOmpAwsLogin } from "./lib/awsLoginConfig.ts";
+import { readPiYuConfig } from "../lib/config.ts";
+import { readOmpAwsLogin } from "./awsLoginConfig.ts";
 
 /**
  * awsLogin config resolution:

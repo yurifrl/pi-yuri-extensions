@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { isModuleEnabled, setConfigStore, type ModuleName } from "../modules/config.ts";
 import { readOmpConfig, writeOmpConfig, CONFIG_PATH } from "./config.ts";
-import aws from "../modules/aws.ts";
+import aws from "../modules/aws/index.ts";
 import budget from "../modules/budget.ts";
 import checkpoint from "../modules/checkpoint/omp.ts";
 import coderabbit from "../modules/coderabbit/index.ts";
