@@ -37,7 +37,7 @@ export type ModuleConfig = {
   events?: Record<string, boolean>;
 };
 
-export const STATUSLINE_COMPONENT_NAMES = ["indicator", "contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
+export const STATUSLINE_COMPONENT_NAMES = ["indicator", "model", "contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
 export const STATUSLINE_COLORS = [
   "accent",
   "success",
@@ -71,6 +71,7 @@ export interface StatuslineConfig {
 
 export const STATUSLINE_DEFAULT_ORDER: StatuslineComponentName[] = [
   "indicator",
+  "model",
   "contextLimit",
   "budget",
   "sessionCost",

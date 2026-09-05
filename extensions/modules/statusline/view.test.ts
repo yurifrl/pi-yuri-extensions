@@ -59,5 +59,5 @@ test("migrateStatusline returns undefined for absent, non-object, and empty valu
 });
 
 test("default order covers every documented component", () => {
-	expect(STATUSLINE_DEFAULT_ORDER).toEqual(["indicator", "contextLimit", "budget", "sessionCost", "aws", "kube"]);
+	expect(STATUSLINE_DEFAULT_ORDER).toEqual(["indicator", "model", "contextLimit", "budget", "sessionCost", "aws", "kube"]);
 });

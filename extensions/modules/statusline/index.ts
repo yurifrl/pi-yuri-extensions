@@ -17,7 +17,7 @@ import { renderStatusRow } from "./view.ts";
 import type { ComponentHost, HostAggregate, StatuslineTheme } from "./types.ts";
 import { publishIndicatorHost } from "./components/indicator.ts";
 import { publishContextSource } from "./components/context-limit.ts";
-import { publishSessionCostContext } from "./components/session-cost.ts";
+import { publishModelContext } from "./components/model.ts";
 
 type ParsedConfig = { enabled: boolean } & Record<string, unknown>;
 
@@ -127,7 +127,7 @@ export default function statusline(pi: ExtensionAPI): void {
 		latestCtx = ctx;
 		// Publish live-context slots the pure component render() fns read; republished on every session event.
 		publishContextSource(ctxSlot, ctxLimit);
-		publishSessionCostContext(ctxSlot);
+		publishModelContext(ctxSlot);
 		if (!ctx.hasUI) return;
 		ctx.ui.setWidget(
 			"yuri-statusline",
@@ -155,7 +155,7 @@ export default function statusline(pi: ExtensionAPI): void {
 	widenedPi.on("session_switch", (_event, ctx) => {
 		latestCtx = ctx;
 		publishContextSource(ctxSlot, ctxLimit);
-		publishSessionCostContext(ctxSlot);
+		publishModelContext(ctxSlot);
 		stopComponents();
 		if (ctx.hasUI) startComponents();
 	});
