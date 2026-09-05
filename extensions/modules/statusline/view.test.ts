@@ -8,14 +8,22 @@ const arrow = String.fromCharCode(0xe0b1);
 const theme: StatuslineTheme = {
 	fg: (_color, text) => `\x1b[36m${text}\x1b[39m`,
 	bg: (_color, text) => `\x1b[48;5;16m${text}\x1b[49m`,
+	getBgAnsi: (_color) => "\x1b[48;5;16m",
 };
 
-test("renderStatusRow bands the row with spaced separators, ending at the last segment", () => {
+test("renderStatusRow bands the row with spaced separators and a solid end cap", () => {
 	const row = renderStatusRow(["a", "b", "c"], 20, theme)[0] ?? "";
+	const cap = `\x1b[38;5;16m${String.fromCharCode(0xe0b0)}\x1b[39m`;
 	expect(row.startsWith("\x1b[48;5;16m")).toBe(true);
-	expect(row.endsWith("\x1b[49m")).toBe(true);
-	expect(visibleWidth(row)).toBe(11);
+	expect(row.endsWith(cap)).toBe(true);
+	expect(visibleWidth(row)).toBe(12);
 	expect(row).toContain(` a \x1b[36m${arrow}\x1b[39m b \x1b[36m${arrow}\x1b[39m c `);
+});
+
+test("renderStatusRow drops the end cap when the band fill is transparent", () => {
+	const flat = (bgAnsi: string): StatuslineTheme => ({ ...theme, getBgAnsi: () => bgAnsi });
+	expect(renderStatusRow(["a"], 20, flat(""))[0] ?? "").toEndWith("\x1b[49m");
+	expect(renderStatusRow(["a"], 20, flat("\x1b[49m"))[0] ?? "").toEndWith("\x1b[49m");
 });
 
 test("renderStatusRow drops empty segments, collapses when everything is empty or width is zero", () => {

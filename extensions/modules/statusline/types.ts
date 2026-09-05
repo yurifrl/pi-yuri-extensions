@@ -14,6 +14,8 @@ export interface StatuslineTheme {
 	fg(color: StatuslineColor, text: string): string;
 	/** Band fill behind the row; omp themes carry `statusLineBg`. */
 	bg(color: string, text: string): string;
+	/** Raw ANSI open sequence for a background color; the end cap reuses the band fill as fg. */
+	getBgAnsi(color: string): string;
 }
 
 /** Transient state a component reports through the host; the indicator aggregates them. */
