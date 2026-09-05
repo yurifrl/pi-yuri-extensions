@@ -10,11 +10,11 @@ const theme: StatuslineTheme = {
 	bg: (_color, text) => `\x1b[48;5;16m${text}\x1b[49m`,
 };
 
-test("renderStatusRow bands the row with spaced separators padded to full width", () => {
+test("renderStatusRow bands the row with spaced separators, ending at the last segment", () => {
 	const row = renderStatusRow(["a", "b", "c"], 20, theme)[0] ?? "";
 	expect(row.startsWith("\x1b[48;5;16m")).toBe(true);
 	expect(row.endsWith("\x1b[49m")).toBe(true);
-	expect(visibleWidth(row)).toBe(20);
+	expect(visibleWidth(row)).toBe(11);
 	expect(row).toContain(` a \x1b[36m${arrow}\x1b[39m b \x1b[36m${arrow}\x1b[39m c `);
 });
 
