@@ -112,13 +112,12 @@ export default function statusline(pi: ExtensionAPI): void {
 
 	function renderPrefix(): string {
 		if (prefixCfg === "none") return "";
-		if (prefixCfg !== "state") return `${prefixCfg} `;
+		if (prefixCfg !== "state") return prefixCfg;
 		if (!theme) return "";
 		const component = getComponent("indicator");
 		const cfg = parsedConfigs.get("indicator");
 		if (!component || !cfg?.enabled) return "";
-		const rendered = component.render(cfg, theme);
-		return rendered ? `${rendered} ` : "";
+		return component.render(cfg, theme);
 	}
 
 
@@ -136,13 +135,12 @@ export default function statusline(pi: ExtensionAPI): void {
 				redrawing = () => tui.requestRender();
 				return {
 					invalidate() {},
-					render(width: number): string[] {
-						const prefix = renderPrefix();
-						const prefixWidth = prefix ? [...prefix].length : 0;
-						const inner = renderStatusRow(renderSegments(), Math.max(0, width - prefixWidth));
-						if (inner.length === 0) return [];
-						return [`${prefix}${inner[0]}`];
-					},
+				render(width: number): string[] {
+					if (!theme) return [];
+					const prefix = renderPrefix();
+					const parts = prefix ? [prefix, ...renderSegments()] : renderSegments();
+					return renderStatusRow(parts, width, theme);
+				},
 				};
 			},
 			{ placement: "aboveEditor" },

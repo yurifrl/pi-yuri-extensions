@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-05 Statusline widget renders as a native-style band
+
+### Fixed
+- `statusline/view.ts` now renders the row the way omp's native status line does: `statusLineBg` band fill padded to full widget width, segments joined with ` <sep> ` (spaced powerline-thin arrow, `statusLineSep` fg) instead of bare U+E0B1 with no spacing. `StatuslineTheme` gains `bg()`; `statusLineSep` added to the color vocabulary. Prefix/indicator renders inside the band as the first part.
+
 ## 2026-09-01 Port @fbr/toolkit into shared + omp modules
 
 ### Added

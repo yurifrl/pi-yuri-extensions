@@ -1,11 +1,31 @@
 import { expect, test } from "bun:test";
+import { visibleWidth } from "@mariozechner/pi-tui";
 import { migrateStatusline, STATUSLINE_DEFAULT_ORDER, type StatuslineConfig } from "../config.ts";
+import type { StatuslineTheme } from "./types.ts";
 import { renderStatusRow } from "./view.ts";
 
-test("renderStatusRow joins non-empty segments and truncates to width", () => {
-	const arrow = String.fromCharCode(0xe0b1);
-	expect(renderStatusRow(["a", "b", "c"], 80)).toEqual([`a${arrow}b${arrow}c`]);
-	expect(renderStatusRow(["a", "", "c"], 80)).toEqual([`a${arrow}c`]);
+const arrow = String.fromCharCode(0xe0b1);
+const theme: StatuslineTheme = {
+	fg: (_color, text) => `\x1b[36m${text}\x1b[39m`,
+	bg: (_color, text) => `\x1b[48;5;16m${text}\x1b[49m`,
+};
+
+test("renderStatusRow bands the row with spaced separators padded to full width", () => {
+	const row = renderStatusRow(["a", "b", "c"], 20, theme)[0] ?? "";
+	expect(row.startsWith("\x1b[48;5;16m")).toBe(true);
+	expect(row.endsWith("\x1b[49m")).toBe(true);
+	expect(visibleWidth(row)).toBe(20);
+	expect(row).toContain(` a \x1b[36m${arrow}\x1b[39m b \x1b[36m${arrow}\x1b[39m c `);
+});
+
+test("renderStatusRow drops empty segments, collapses when everything is empty or width is zero", () => {
+	expect(renderStatusRow(["a", "", "c"], 20, theme)[0]).toContain(` a \x1b[36m${arrow}\x1b[39m c `);
+	expect(renderStatusRow(["a"], 0, theme)).toEqual([]);
+});
+
+test("renderStatusRow truncates overflowing segments to the widget width", () => {
+	const row = renderStatusRow(["abcdefghijklmnop"], 10, theme)[0] ?? "";
+	expect(visibleWidth(row)).toBe(10);
 });
 
 test("migrateStatusline passes an already-migrated block through", () => {

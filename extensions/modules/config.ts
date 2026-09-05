@@ -46,6 +46,7 @@ export const STATUSLINE_COLORS = [
   "statusLineContext",
   "statusLineSpend",
   "statusLineCost",
+  "statusLineSep",
 ] as const;
 
 export type StatuslineComponentName = (typeof STATUSLINE_COMPONENT_NAMES)[number];
