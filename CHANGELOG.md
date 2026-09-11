@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-08 diff-watch: pull cmux/Hunk diff-review comments into the session
+
+### Added
+- `extensions/omp/modules/diff-watch.ts` — reads diff-review comments from two sources and submits new ones into the current OMP session as a followUp message. Sources: cmux's diff viewer (comment stores under `~/Library/Application Support/cmux/diff-comments/<sha256(canonical repo root)[0:24]>.json` — no comments CLI/events on cmux 0.64.x, so the store is read directly) and live Hunk sessions (`hunk session comment list --repo <root> --json`; empty when no session/daemon). Per-source toggles under `modules.diff-watch.sources`.
+- `/diff-watch [on|off|status]` (`/dw`) — toggle a 2s poller for the session repo's comments; new comments arrive as one formatted followUp. `/diff-sync [--all]` (`/ds`) — one-shot submit (current repo, or every repo with a store via `--all`).
+- Sent pointers per session file + repo (`~/.omp/agent/diff-watch/<session>.json`): a comment is submitted exactly once per session; re-keyed on `session_switch`/`session_branch`.
+- LLM tools: `diff_pending` (new, unsent), `diff_all` (everything, `sent` flags, `scope: "all"` across repos), `diff_cmux_all` / `diff_hunk_all` (per-source dumps), `diff_get` (full records incl. cmux `submissionText` diff context, by id), `diff_mark_sent` (advance the pointer manually).
+- `"diff-watch"` in `MODULE_NAMES`/`DEFAULT_CONFIG` (`extensions/modules/config.ts`) with `sources: {cmux, hunk}` per-module config; registered in the OMP loader. Disabled by default; enabled in `~/.omp/agent/extensions/pi-yuri-extensions.json`.
+
+
 ## 2026-09-05 Statusline widget renders as a native-style band
 
 ### Fixed

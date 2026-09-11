@@ -20,6 +20,7 @@ export const MODULE_NAMES = [
   "statusline",
   "thinking",
   "update",
+  "diff-watch",
 ] as const;
 
 export type ModuleName = (typeof MODULE_NAMES)[number];
@@ -35,6 +36,8 @@ export type ModuleConfig = {
   debug?: boolean;
   /** notifications module: per-event on/off overrides (see omp/modules/notifications.ts). */
   events?: Record<string, boolean>;
+  /** diff-watch module: which review-comment sources to poll (cmux diff viewer, hunk sessions). */
+  sources?: { cmux?: boolean; hunk?: boolean };
 };
 
 export const STATUSLINE_COMPONENT_NAMES = ["indicator", "model", "contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
@@ -150,6 +153,7 @@ export const DEFAULT_CONFIG: Required<Pick<YuriExtensionsConfig, "modules">> & P
     thinking: { enabled: true },
     update: { enabled: true },
     save: { enabled: true },
+    "diff-watch": { enabled: false, sources: { cmux: true, hunk: true } },
   },
 };
 
