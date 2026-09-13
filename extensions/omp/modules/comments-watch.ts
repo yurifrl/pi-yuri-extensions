@@ -1,5 +1,5 @@
 /**
- * Diff Watch — pull diff-review comments from cmux's diff viewer and Hunk's live
+ * Comments Watch — pull diff-review comments from cmux's diff viewer and Hunk's live
  * sessions into the current OMP session.
  *
  * Sources (both read-only, toggleable via module config `sources`):
@@ -8,21 +8,24 @@
  *   (no comments CLI/events on cmux 0.64.x — we read the store directly).
  * - hunk: `hunk session comment list --repo <root> --json` against the live daemon.
  *
- * /diff-watch [on|off|status] (/dw) — toggle a poller that submits new comments for the
- *   session repo into this session as a followUp message.
- * /diff-sync [--all] (/ds) — one-shot: submit new comments now (current repo, or every
- *   repo that has a store when `--all`).
+ * /comments-watch [on|off|status] [filter] — toggle a poller that submits new comments for
+ *   the session repo into this session as a followUp message. Optional filter: a regex
+ *   matched against comment file paths, or a comma-separated file list (exact or
+ *   path-suffix match). No filter = all comments for the repo.
+ * /comments-sync [--all] [filter] — one-shot: submit new comments now (current repo, or
+ *   every repo that has a store when `--all`), with the same optional filter.
  *
  * Both keep a per-session, per-repo "sent" pointer (seen comment ids per source) so a
- * comment is submitted exactly once. LLM-facing tools (diff_pending, diff_all,
+ * comment is submitted exactly once. Comments excluded by the filter stay unsent and are
+ * reconsidered on the next poll/sync. LLM-facing tools (diff_pending, diff_all,
  * diff_cmux_all, diff_hunk_all, diff_get, diff_mark_sent) expose the same data without
  * advancing pointers unless the model calls diff_mark_sent.
  *
- * Disable: "modules": { "diff-watch": { "enabled": false } }.
+ * Disable: "modules": { "comments-watch": { "enabled": false } }.
  */
 import type { ExtensionAPI, ExtensionContext, Theme } from "@oh-my-pi/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { readSharedConfig } from "../../modules/config.ts";
@@ -241,14 +244,56 @@ function formatComments(comments: DiffComment[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Filtering
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional comment filter. A regex is matched against the comment's file path; a
+ * comma-separated value is a file list matched exactly or by path suffix (`foo.ts`
+ * matches `src/foo.ts`). No filter = every comment for the repo.
+ */
+export interface CommentFilter {
+	describe: string;
+	test: (filePath: string) => boolean;
+}
+
+export function parseFilter(raw: string | undefined): CommentFilter | undefined {
+	const text = raw?.trim();
+	if (!text) return undefined;
+	if (text.includes(",")) {
+		const files = text.split(",").map((f) => f.trim()).filter(Boolean);
+		return {
+			describe: files.join(", "),
+			test: (filePath) => files.some((f) => filePath === f || filePath.endsWith(`/${f}`)),
+		};
+	}
+	let re: RegExp;
+	try {
+		re = new RegExp(text);
+	} catch {
+		throw new Error(`invalid filter regex: ${text}`);
+	}
+	return { describe: `/${text}/`, test: (filePath) => re.test(filePath) };
+}
+
+// ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
 
-export default function diffWatch(pi: ExtensionAPI): void {
+export default function commentsWatch(pi: ExtensionAPI): void {
 	const agentDir = ompAgentDir(pi);
-	const stateDir = agentDir ? join(agentDir, "diff-watch") : join(homedir(), ".config", "pi-yuri-extensions", "diff-watch");
+	const stateDir = agentDir ? join(agentDir, "comments-watch") : join(homedir(), ".config", "pi-yuri-extensions", "comments-watch");
+	// One-time migration: sent-pointer files used to live under "diff-watch/".
+	const legacyStateDir = agentDir ? join(agentDir, "diff-watch") : join(homedir(), ".config", "pi-yuri-extensions", "diff-watch");
+	if (!existsSync(stateDir) && existsSync(legacyStateDir)) {
+		try {
+			renameSync(legacyStateDir, stateDir);
+		} catch {
+			// stale pointers are harmless — a session would re-submit old comments once
+		}
+	}
 
-	const moduleCfg = readSharedConfig().modules?.["diff-watch"];
+	const moduleCfg = readSharedConfig().modules?.["comments-watch"];
 	const sources: SourceFlags = {
 		cmux: moduleCfg?.sources?.cmux ?? true,
 		hunk: moduleCfg?.sources?.hunk ?? true,
@@ -261,6 +306,7 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	let pollTimer: ReturnType<ExtensionContext["setTimeout"]> | undefined;
 	let pollCtx: ExtensionContext | undefined;
 	let watchedRepo: string | undefined;
+	let watchFilter: CommentFilter | undefined;
 
 	// ---- pointer persistence: one file per session, all repos in one object ----
 	const stateFile = () => (sessionKey ? join(stateDir, `${sessionKey.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`) : undefined);
@@ -318,15 +364,15 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	const readSource = (source: "cmux" | "hunk", repoRoot: string): Promise<DiffComment[]> | DiffComment[] =>
 		source === "cmux" ? readCmuxComments(repoRoot) : readHunkComments(pi, repoRoot);
 
-	/** Comments from enabled sources not yet marked sent for this session. */
-	const collectNew = async (repoRoot: string): Promise<DiffComment[]> => {
+	/** Comments from enabled sources not yet marked sent for this session, optionally filtered. */
+	const collectNew = async (repoRoot: string, filter?: CommentFilter): Promise<DiffComment[]> => {
 		const pointers = pointersFor(repoRoot);
 		const fresh: DiffComment[] = [];
 		for (const source of ["cmux", "hunk"] as const) {
 			if (!sources[source]) continue;
 			const bucket = source === "hunk" ? pointers.hunk : pointers.cmux;
 			for (const c of await readSource(source, repoRoot)) {
-				if (!bucket.includes(c.id)) fresh.push(c);
+				if (!bucket.includes(c.id) && (!filter || filter.test(c.filePath))) fresh.push(c);
 			}
 		}
 		return fresh;
@@ -351,20 +397,21 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	};
 
 	// ---- submit ----
-	const submit = async (ctx: ExtensionContext, scope: "repo" | "all"): Promise<number> => {
+	const submit = async (ctx: ExtensionContext, scope: "repo" | "all", filter?: CommentFilter): Promise<number> => {
 		const repos = await reposForScope(ctx, scope);
 		const allFresh: DiffComment[] = [];
 		for (const repo of repos) {
-			const fresh = await collectNew(repo);
+			const fresh = await collectNew(repo, filter);
 			allFresh.push(...fresh);
 			markSent(repo, fresh);
 		}
+		const filterNote = filter ? ` (filter: ${filter.describe})` : "";
 		if (allFresh.length === 0) {
-			ctx.ui.notify("diff-sync: no new comments", "info");
+			ctx.ui.notify(`comments-sync: no new comments${filterNote}`, "info");
 			return 0;
 		}
 		pi.sendUserMessage(formatComments(allFresh), { deliverAs: "followUp" });
-		ctx.ui.notify(`diff-sync: submitted ${allFresh.length} comment${allFresh.length === 1 ? "" : "s"}`, "info");
+		ctx.ui.notify(`comments-sync: submitted ${allFresh.length} comment${allFresh.length === 1 ? "" : "s"}${filterNote}`, "info");
 		return allFresh.length;
 	};
 
@@ -372,15 +419,17 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	const refreshWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		if (!watching) {
-			ctx.ui.setWidget("yuri-diff-watch", undefined);
+			ctx.ui.setWidget("yuri-comments-watch", undefined);
 			return;
 		}
-		ctx.ui.setWidget("yuri-diff-watch", (_tui, theme: Theme) => ({
+		ctx.ui.setWidget("yuri-comments-watch", (_tui, theme: Theme) => ({
 			invalidate() {},
 			render(width: number): string[] {
 				const repoShort = watchedRepo?.split("/").slice(-2).join("/") ?? "";
 				const srcs = [sources.cmux ? "cmux" : "", sources.hunk ? "hunk" : ""].filter(Boolean).join("+");
-				return [theme.fg("accent", ` ◉ diff-watch ${srcs} · ${repoShort}`)];
+				const filter = watchFilter ? ` · ${watchFilter.describe}` : "";
+				const text = ` ◉ comments-watch ${srcs}${filter} · ${repoShort}`;
+				return [theme.fg("accent", text.length > width ? `${text.slice(0, Math.max(width - 1, 1))}…` : text)];
 			},
 		}));
 	};
@@ -388,18 +437,19 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	// ---- poller ----
 	const stopWatch = (ctx?: ExtensionContext) => {
 		watching = false;
+		watchFilter = undefined;
 		if (pollTimer) {
 			(pollCtx ?? ctx)?.clearTimer(pollTimer);
 			pollTimer = undefined;
 		}
-		ctx?.ui.setWidget("yuri-diff-watch", undefined);
+		ctx?.ui.setWidget("yuri-comments-watch", undefined);
 	};
 
 	const tick = async (ctx: ExtensionContext, atGeneration: number) => {
 		if (!watching || atGeneration !== generation) return;
 		try {
 			if (watchedRepo) {
-				const fresh = await collectNew(watchedRepo);
+				const fresh = await collectNew(watchedRepo, watchFilter);
 				if (fresh.length > 0) {
 					markSent(watchedRepo, fresh);
 					pi.sendUserMessage(formatComments(fresh), { deliverAs: "followUp" });
@@ -411,43 +461,70 @@ export default function diffWatch(pi: ExtensionAPI): void {
 		if (watching && atGeneration === generation) pollTimer = ctx.setTimeout(() => void tick(ctx, atGeneration), POLL_MS);
 	};
 
-	const startWatch = async (ctx: ExtensionContext) => {
+	const startWatch = async (ctx: ExtensionContext, filter?: CommentFilter) => {
 		const repo = await repoRootFor(ctx);
 		if (!repo) {
-			ctx.ui.notify("diff-watch: not inside a git repository", "error");
+			ctx.ui.notify("comments-watch: not inside a git repository", "error");
 			return;
 		}
 		watchedRepo = canonicalRepoRoot(repo);
+		watchFilter = filter;
 		pollCtx = ctx;
 		watching = true;
 		generation++;
 		refreshWidget(ctx);
 		pollTimer = ctx.setTimeout(() => void tick(ctx, generation), POLL_MS);
-		ctx.ui.notify(`diff-watch: on — polling ${watchedRepo} every ${POLL_MS / 1000}s`, "info");
+		ctx.ui.notify(`comments-watch: on — polling ${watchedRepo} every ${POLL_MS / 1000}s${filter ? ` (filter: ${filter.describe})` : ""}`, "info");
 	};
 
 	const handleWatch = async (args: string | undefined, ctx: ExtensionContext) => {
-		const arg = (args ?? "").trim().toLowerCase();
-		if (arg === "status") {
-			const repo = watchedRepo ?? (await repoRootFor(ctx));
-			ctx.ui.notify(watching ? `diff-watch: on (${repo ?? "?"})` : `diff-watch: off${repo ? ` — repo ${repo}` : ""}`, "info");
-			return;
-		}
-		if (watching || arg === "off") {
+		const input = (args ?? "").trim();
+		const match = input.match(/^(on|off|status)\b\s*(.*)$/);
+		const verb = match ? match[1] : input ? "on" : "";
+		const filterRaw = (match ? match[2] : input).trim();
+		if (verb === "off" || (input === "" && watching)) {
 			stopWatch(ctx);
-			ctx.ui.notify("diff-watch: off", "info");
+			ctx.ui.notify("comments-watch: off", "info");
 			return;
 		}
-		await startWatch(ctx);
+		if (verb === "status") {
+			const repo = watchedRepo ?? (await repoRootFor(ctx));
+			const filterNote = watching && watchFilter ? ` — filter: ${watchFilter.describe}` : "";
+			ctx.ui.notify(watching ? `comments-watch: on (${repo ?? "?"})${filterNote}` : `comments-watch: off${repo ? ` — repo ${repo}` : ""}`, "info");
+			return;
+		}
+		// "" / "on [filter]" / bare filter: start the watcher, or update its filter live.
+		let filter: CommentFilter | undefined;
+		try {
+			filter = parseFilter(filterRaw);
+		} catch (error) {
+			ctx.ui.notify(`comments-watch: ${(error as Error).message}`, "error");
+			return;
+		}
+		if (watching) {
+			watchFilter = filter;
+			refreshWidget(ctx);
+			ctx.ui.notify(`comments-watch: filter ${filter ? filter.describe : "cleared"}`, "info");
+			return;
+		}
+		await startWatch(ctx, filter);
 	};
 
 	const handleSync = async (args: string | undefined, ctx: ExtensionContext) => {
-		const scope = (args ?? "").includes("--all") ? "all" : "repo";
-		if (scope === "repo" && !(await repoRootFor(ctx))) {
-			ctx.ui.notify("diff-sync: not inside a git repository (use /diff-sync --all)", "error");
+		const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
+		const scope = tokens.includes("--all") ? "all" : "repo";
+		let filter: CommentFilter | undefined;
+		try {
+			filter = parseFilter(tokens.filter((t) => t !== "--all").join(" "));
+		} catch (error) {
+			ctx.ui.notify(`comments-sync: ${(error as Error).message}`, "error");
 			return;
 		}
-		await submit(ctx, scope);
+		if (scope === "repo" && !(await repoRootFor(ctx))) {
+			ctx.ui.notify("comments-sync: not inside a git repository (use /comments-sync --all)", "error");
+			return;
+		}
+		await submit(ctx, scope, filter);
 	};
 
 	// ---- session lifecycle ----
@@ -471,20 +548,14 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => stopWatch());
 
 	// ---- commands ----
-	pi.registerCommand("diff-watch", {
-		description: "Watch cmux/Hunk diff-review comments for this repo; submit new ones here (on|off|status)",
+	pi.registerCommand("comments-watch", {
+		description:
+			"Watch cmux/Hunk review comments for this repo; submit new ones here (on|off|status [filter]). Filter: regex on file path or comma-separated file list; no filter = all comments.",
 		handler: handleWatch,
 	});
-	pi.registerCommand("dw", {
-		description: "Alias for /diff-watch",
-		handler: handleWatch,
-	});
-	pi.registerCommand("diff-sync", {
-		description: "Submit new cmux/Hunk diff-review comments into this session now (--all for every repo)",
-		handler: handleSync,
-	});
-	pi.registerCommand("ds", {
-		description: "Alias for /diff-sync",
+	pi.registerCommand("comments-sync", {
+		description:
+			"Submit new cmux/Hunk review comments into this session now (--all for every repo; optional filter). Filter: regex on file path or comma-separated file list; no filter = all comments.",
 		handler: handleSync,
 	});
 	// ---- tools (LLM surface) ----
@@ -606,7 +677,7 @@ export default function diffWatch(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "diff_mark_sent",
 		label: "Mark Diff Comments Sent",
-		description: "Advance the sent pointer: mark diff-review comments as submitted for this session so diff_pending and /diff-watch stop re-reporting them. Pass ids, or all:true to consume everything stored for the repo.",
+		description: "Advance the sent pointer: mark diff-review comments as submitted for this session so diff_pending and /comments-watch stop re-reporting them. Pass ids, or all:true to consume everything stored for the repo.",
 		parameters: markSentSchema,
 		async execute(_id, params: MarkSentParams, _signal, _onUpdate, ctx) {
 			const repo = await resolveRepoOrThrow(ctx, params.repo);

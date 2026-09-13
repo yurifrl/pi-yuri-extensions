@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-13 diff-watch renamed to comments-watch; comments filterable by regex or file list
+
+### Changed
+- Module `diff-watch` renamed to `comments-watch` (`extensions/omp/modules/comments-watch.ts`); commands `/diff-watch` and `/diff-sync` renamed to `/comments-watch` and `/comments-sync`, and the `/dw` + `/ds` aliases removed. Config keys in `MODULE_NAMES`/`DEFAULT_CONFIG` (`extensions/modules/config.ts`), the OMP loader, and the global toggle JSON (`~/.omp/agent/extensions/pi-yuri-extensions.json`) follow the new module name.
+- Both commands take an optional filter argument: a regex matched against comment file paths, or a comma-separated file list (exact or path-suffix match — `foo.ts` matches `src/foo.ts`). No filter means all comments for the repo. Filtered-out comments stay unsent and are reconsidered on the next poll/sync; the watch widget and `status` show the active filter, and `off` clears it.
+- Sent-pointer state dir `~/.omp/agent/diff-watch/` renamed to `comments-watch/`; existing pointer files migrate automatically on first load, so sessions do not re-submit old comments.
+
 ## 2026-09-13 Checkpoints maintain one root CHANGELOG.md
 
 ### Fixed

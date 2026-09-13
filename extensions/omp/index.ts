@@ -5,7 +5,7 @@ import aws from "../modules/aws/index.ts";
 import budget from "../modules/budget.ts";
 import checkpoint from "../modules/checkpoint/omp.ts";
 import coderabbit from "../modules/coderabbit/index.ts";
-import diffWatch from "./modules/diff-watch.ts";
+import commentsWatch from "./modules/comments-watch.ts";
 import contextLimit from "../modules/ctx.ts";
 import continueAfterCompact from "./modules/continue.ts";
 import editor from "./modules/editor.ts";
@@ -42,7 +42,7 @@ const MODULES: Partial<Record<ModuleName, OmpModule>> = {
   editor,
   exit: exitTool,
   handoff,
-  "diff-watch": diffWatch,
+  "comments-watch": commentsWatch,
   later,
   quick,
   respond,
