@@ -1,11 +1,9 @@
 # Changelog
 
-## 2026-09-13 Checkpoint writes the root CHANGELOG.md
+## 2026-09-13 Checkpoints maintain one root CHANGELOG.md
 
-### Changed
-- `extensions/modules/checkpoint/skills/checkpoint/SKILL.md` — step 5 now points at an explicit `## CHANGELOG.md contract` instead of the vague "create or update the one matching entry" instruction that let agents dump changelog text into `.agents/checkpoints/`. The contract pins the file to the repo root (`changelogFile` from `checkpoint_prepare`), forbids `CHANGELOG.md` inside the checkpoints folder, embeds the house template (`# Changelog` → `## YYYY-MM-DD Title` → `### Added/Changed/Fixed/Notes`, `- \`path\` — what + why`, commit hash), and states the maintenance patterns: newest-first placement, dedupe by updating the matching scope's entry instead of piling new sections, taxonomy definitions, truthful delivered-work-only bullets.
-- `extensions/modules/checkpoint/core.ts` — `prepareCheckpoint` now returns `changelogFile: path.join(cwd, "CHANGELOG.md")` so both runtimes hand the agent the exact root path deterministically.
-- `scripts/verify-checkpoint.mjs` — asserts `changelogFile` resolves to the repo root for both pi and omp prepared checkpoints.
+### Fixed
+- Sessions were scattering changelog notes into `.agents/checkpoints/` because the checkpoint skill only said "create or update the one matching entry" — no location, no template, no rules. The skill now embeds an explicit changelog contract (repo root only, intention-first entries, minimal code mentions, dedupe over pile-up) and `checkpoint_prepare` returns that root path as `changelogFile`, so Pi and OMP sessions append to one shared history.
 
 ## 2026-09-08 diff-watch: pull cmux/Hunk diff-review comments into the session
 

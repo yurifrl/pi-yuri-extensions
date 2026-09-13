@@ -25,25 +25,29 @@ A checkpoint is working memory, not a transcript. Retain decisions, constraints,
 
 The changelog lives at the repo root — the exact `changelogFile` path returned by `checkpoint_prepare` (e.g. `<repo>/CHANGELOG.md`). Never create or edit a `CHANGELOG.md` inside the checkpoints folder (`.agents/checkpoints/`) or any other nested directory; checkpoint files never contain changelog entries. If the file does not exist, create it with the `# Changelog` heading.
 
+Write for humans, not the diff. Every entry leads with intention: the problem solved, the capability gained, or the behavior that changed for whoever uses this project. Someone who never opened the code should understand what improved. The changelog is a curated summary, not a commit log.
+
 Template — one `##` section per delivered unit of work, newest first directly under the heading:
 
     # Changelog
 
-    ## YYYY-MM-DD Title Case Summary
+    ## YYYY-MM-DD Outcome in a few words
 
     ### Added
-    - `path/to/file` — what was added and why. Commit `abc1234`, pushed.
+    - Large exports no longer time out: reports stream as they build instead of being held in memory.
 
     ### Changed
-    - `path/to/file` — what changed and why.
+    - `/checkpoint` now targets the repo-root changelog, so every runtime appends to one shared history.
 
     ### Fixed
-    - `path/to/file` — what was broken and the fix.
+    - Statusline band follows the theme again after idle instead of keeping stale colors.
 
 Maintenance patterns:
 
-- **Update, don't pile up.** Before adding a section, scan existing sections for one covering the same scope (same files/module/feature); extend or correct that entry's bullets instead of adding a duplicate section. New section only for genuinely new work.
-- **Taxonomy.** `Added` = new capability or files, `Changed` = behavior/contract changes to existing things, `Fixed` = bug fixes. `Notes` for context fitting none of these.
-- **Bullet format.** `- \`primary path\` — concise what + why`, one bullet per file or logical unit. Mention the commit hash when committed.
-- **Truthful.** Only delivered work present in the tree. No plans, intentions, or session narration. Keep checkpoint sections (Context/Decisions/…) out of the changelog.
-- **Placement.** Insert new sections immediately after `# Changelog` (newest first); leave older sections untouched except to dedupe.
+- **Intention first.** Lead with what the reader gains or what stopped breaking — "dashboard no longer freezes during large reports", not "fixed async loop timing". Name the capability, the symptom gone, or the friction removed.
+- **Minimal code mentions.** At most one file/command/module reference per entry, and only when it anchors the change for the reader (a command, a config key, a new module). Never enumerate every touched file — git history owns that.
+- **Curate.** One entry per delivered unit of work: merge related edits into a single bullet, drop internal-only churn (refactors, formatting, test plumbing) unless it changes observable behavior.
+- **Update, don't pile up.** Scan existing sections for one covering the same scope (same feature/module); extend or correct that entry instead of adding a duplicate section.
+- **Taxonomy.** `Added` = new capability, `Changed` = behavior or contract changed, `Fixed` = misbehavior gone, `Deprecated`/`Removed` = things retiring. Breaking changes are called out explicitly with what replaces them.
+- **Truthful.** Only delivered work present in the tree. No plans, future intent, or session narration.
+- **Placement.** Insert new sections directly after `# Changelog` (newest first); leave older sections untouched except to dedupe.
