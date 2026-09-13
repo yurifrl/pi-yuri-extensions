@@ -6,24 +6,16 @@ description: "Save durable, AI-readable session context and a truthful changelog
 
 Use this command to preserve the session for a later agent in either Pi or OMP. Optional command guidance is extra context, not a directive to expand scope.
 
-1. Derive a concise kebab-case checkpoint name and one-sentence session description.
-2. Call `checkpoint_prepare`.
-3. Write or update the returned `checkpointFile` with YAML frontmatter:
-   - `created`
-   - `project`
-   - `description`
-   - `session_id`
-   - `resume_with`
-   - `checkpoint_file`
-4. Follow the frontmatter with concise sections: Context, Decisions, Current State, Lessons, and Next Steps.
-5. Maintain the root `CHANGELOG.md` per the contract below.
-6. Print a self-contained current-state summary and short chronological timeline.
+1. Derive a concise kebab-case checkpoint name, a one-sentence session description, and distill the session into bullets.
+2. Call the `checkpoint_save` tool with `name`, `description`, `context` (one paragraph), and the `decisions`, `currentState`, `lessons`, `nextSteps` bullet arrays. The tool writes or updates the session's checkpoint file on disk — do not write that file by hand.
+3. Call the `changelog_update` tool once with `title`, `category`, and intention-first `bullets` (see the contract below). Call it again only for additional distinct delivered work.
+4. Print a self-contained current-state summary and short chronological timeline.
+
+Do NOT use the runtime's built-in `checkpoint` / `rewind` context tools for this. Those only park or restore conversation context — they write nothing to disk. The checkpoint file and changelog are saved exclusively by `checkpoint_save` and `changelog_update`.
 
 A checkpoint is working memory, not a transcript. Retain decisions, constraints, evidence, and open work needed to resume safely. Do not create additional workflows or exit the current agent runtime.
 
-## CHANGELOG.md contract
-
-The changelog lives at the repo root — the exact `changelogFile` path returned by `checkpoint_prepare` (e.g. `<repo>/CHANGELOG.md`). Never create or edit a `CHANGELOG.md` inside the checkpoints folder (`.agents/checkpoints/`) or any other nested directory; checkpoint files never contain changelog entries. If the file does not exist, create it with the `# Changelog` heading.
+The changelog is maintained through the `changelog_update` tool, which writes the repo root `CHANGELOG.md` (`<cwd>/CHANGELOG.md`). Never create or edit a `CHANGELOG.md` inside the checkpoints folder (`.agents/checkpoints/`) or any other nested directory; checkpoint files never contain changelog entries.
 
 Write for humans, not the diff. Every entry leads with intention: the problem solved, the capability gained, or the behavior that changed for whoever uses this project. Someone who never opened the code should understand what improved. The changelog is a curated summary, not a commit log.
 

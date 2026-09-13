@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareCheckpoint } from "./core.ts";
+import { prepareCheckpoint, renderCheckpointMarkdown, upsertChangelogEntry, writeCheckpointFile, type ChangelogCategory } from "./core.ts";
 
 const skillPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "skills");
 const touchedFiles = new Set<string>();
@@ -31,7 +31,7 @@ export default function checkpoint(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "checkpoint_prepare",
     label: "Prepare Checkpoint",
-    description: "Prepare deterministic session metadata and a checkpoint path. The caller writes the AI-authored checkpoint and changelog.",
+    description: "Prepare deterministic session metadata and paths (checkpoint file, changelog file). Prefer checkpoint_save and changelog_update, which write the files.",
     parameters: Type.Object({ name: Type.String({ description: "Kebab-case checkpoint name." }) }),
     async execute(_id, params, _signal, _update, ctx) {
       const session = sessionOf(ctx);
@@ -43,6 +43,60 @@ export default function checkpoint(pi: ExtensionAPI): void {
         resume: `pi --resume ${session.id}`,
       });
       return { content: [{ type: "text", text: JSON.stringify(details, null, 2) }], details };
+    },
+  });
+  pi.registerTool({
+    name: "checkpoint_save",
+    label: "Save Checkpoint",
+    description: "Create or update this session's checkpoint file: YAML frontmatter plus Context/Decisions/Current State/Lessons/Next Steps. Writes to disk.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Kebab-case checkpoint name." }),
+      description: Type.String({ description: "One-sentence session description." }),
+      context: Type.String({ description: "Paragraph: what this session was about and where it stands." }),
+      decisions: Type.Array(Type.String({ description: "Decision bullet." }), { description: "Decisions made, one bullet each." }),
+      currentState: Type.Array(Type.String({ description: "Current-state bullet." }), { description: "Verifiable current-state facts, one bullet each." }),
+      lessons: Type.Array(Type.String({ description: "Lesson bullet." }), { description: "Reusable lessons, one bullet each." }),
+      nextSteps: Type.Array(Type.String({ description: "Next-step bullet." }), { description: "Open next steps, one bullet each." }),
+    }),
+    async execute(_id, params, _signal, _update, ctx) {
+      const session = sessionOf(ctx);
+      const prepared = prepareCheckpoint({
+        cwd: cwdOf(ctx),
+        session,
+        name: params.name,
+        touchedFiles: [...touchedFiles],
+        resume: `pi --resume ${session.id}`,
+      });
+      const markdown = renderCheckpointMarkdown(prepared, params, new Date().toISOString().slice(0, 10));
+      writeCheckpointFile(prepared.checkpointFile, markdown);
+      return { content: [{ type: "text", text: JSON.stringify({ checkpointFile: prepared.checkpointFile, updated: prepared.existing }, null, 2) }], details: { checkpointFile: prepared.checkpointFile, updated: prepared.existing } };
+    },
+  });
+  pi.registerTool({
+    name: "changelog_update",
+    label: "Update Changelog",
+    description: "Insert or update the repo-root CHANGELOG.md entry for delivered work. Bullets lead with intention (outcome for the reader), minimal code mentions.",
+    parameters: Type.Object({
+      title: Type.String({ description: "Outcome title, a few words, Title Case." }),
+      category: Type.Union([
+        Type.Literal("Added"),
+        Type.Literal("Changed"),
+        Type.Literal("Fixed"),
+        Type.Literal("Deprecated"),
+        Type.Literal("Removed"),
+        Type.Literal("Notes"),
+      ], { description: "Entry category." }),
+      bullets: Type.Array(Type.String({ description: "Intention-first bullet." }), { description: "What the reader gains or what stopped breaking; at most one path/command mention per bullet." }),
+      date: Type.Optional(Type.String({ description: "Entry date YYYY-MM-DD; defaults to today." })),
+    }),
+    async execute(_id, params, _signal, _update, ctx) {
+      const result = upsertChangelogEntry(path.join(cwdOf(ctx), "CHANGELOG.md"), {
+        title: params.title,
+        category: params.category as ChangelogCategory,
+        bullets: params.bullets,
+        date: params.date,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
   pi.registerCommand("checkpoint", {

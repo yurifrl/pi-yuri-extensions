@@ -4,6 +4,7 @@
 
 ### Fixed
 - Sessions were scattering changelog notes into `.agents/checkpoints/` because the checkpoint skill only said "create or update the one matching entry" — no location, no template, no rules. The skill now embeds an explicit changelog contract (repo root only, intention-first entries, minimal code mentions, dedupe over pile-up) and `checkpoint_prepare` returns that root path as `changelogFile`, so Pi and OMP sessions append to one shared history.
+- Worse, the model answered `/checkpoint` by calling the runtime's built-in `checkpoint`/`rewind` context tools — those only park conversation context and never touch disk, so neither the checkpoint file nor the changelog was written at all. Two deterministic tools now own the writes: `checkpoint_save` renders frontmatter + Context/Decisions/Current State/Lessons/Next Steps and creates or updates the session's checkpoint file, and `changelog_update` inserts or merges the root `CHANGELOG.md` section (date-ordered newest-first, deduplicates bullets, groups by Added/Changed/Fixed category). The skill calls exactly these two and warns against the built-in pair.
 
 ## 2026-09-08 diff-watch: pull cmux/Hunk diff-review comments into the session
 
