@@ -1,9 +1,14 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { prepareCheckpoint, renderCheckpointMarkdown, upsertChangelogEntry, writeCheckpointFile, type CheckpointContent, type ChangelogInput } from "./core.ts";
+
+const skillPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "skills");
 
 const touchedFiles = new Set<string>();
 
 export default function checkpoint(pi: ExtensionAPI): void {
+  pi.on("resources_discover", async () => ({ skillPaths: [skillPath] }));
   pi.on("tool_call", (event, ctx) => {
     if (event.toolName !== "write" && event.toolName !== "edit") return;
     const file = event.input.path;

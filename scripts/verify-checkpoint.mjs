@@ -107,4 +107,8 @@ const piSkillPath = "./extensions/modules/checkpoint/skills";
 assert.deepEqual(manifest.pi.skills, [piSkillPath]);
 assert.deepEqual(manifest.omp.skills, [piSkillPath]);
 assert.equal(await Bun.file("extensions/modules/checkpoint/skills/checkpoint/SKILL.md").exists(), true);
+for (const runtime of ["pi", "omp"]) {
+  const module = await Bun.file(`extensions/modules/checkpoint/${runtime}.ts`).text();
+  assert.ok(module.includes('"resources_discover"') && module.includes('"skills"'), `${runtime} checkpoint module must register skill discovery`);
+}
 console.log("checkpoint runtime wiring verified");
