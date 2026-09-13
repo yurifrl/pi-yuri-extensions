@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-13 LLM tools renamed diff_* to comment_*
+
+### Changed
+- Tool surface follows the module rename: `diff_pending` → `comment_pending`, `diff_all` → `comment_all`, `diff_cmux_all` → `comment_cmux_all`, `diff_hunk_all` → `comment_hunk_all`, `diff_get` → `comment_get`, `diff_mark_sent` → `comment_mark_sent`. Labels and descriptions drop the "Diff" prefix; internal cross-references (formatComments footer, docblock) follow.
+- `begin-single-feature` skill section now teaches the `comment_*` tools and no longer names Hunk or its CLI (the `hunk-review` skill still owns direct Hunk driving).
+
 ## 2026-09-13 diff-watch renamed to comments-watch; comments filterable by regex or file list
 
 ### Changed

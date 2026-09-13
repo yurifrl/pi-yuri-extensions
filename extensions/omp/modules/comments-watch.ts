@@ -17,9 +17,9 @@
  *
  * Both keep a per-session, per-repo "sent" pointer (seen comment ids per source) so a
  * comment is submitted exactly once. Comments excluded by the filter stay unsent and are
- * reconsidered on the next poll/sync. LLM-facing tools (diff_pending, diff_all,
- * diff_cmux_all, diff_hunk_all, diff_get, diff_mark_sent) expose the same data without
- * advancing pointers unless the model calls diff_mark_sent.
+ * reconsidered on the next poll/sync. LLM-facing tools (comment_pending, comment_all,
+ * comment_cmux_all, comment_hunk_all, comment_get, comment_mark_sent) expose the same data without
+ * advancing pointers unless the model calls comment_mark_sent.
  *
  * Disable: "modules": { "comments-watch": { "enabled": false } }.
  */
@@ -50,7 +50,7 @@ export interface DiffComment {
 	/** cmux-only: set once the comment was delivered to an agent via cmux's TextBox. */
 	consumedAt?: string | null;
 	author?: string | null;
-	/** Present on diff_all output: whether this session already submitted the comment. */
+	/** Present on comment_all output: whether this session already submitted the comment. */
 	sent?: boolean;
 }
 
@@ -229,7 +229,7 @@ function formatComments(comments: DiffComment[]): string {
 		list.push(c);
 		byRepo.set(c.repoRoot, list);
 	}
-	const parts: string[] = [`Diff review comments (${comments.length}):`];
+	const parts: string[] = [`Review comments (${comments.length}):`];
 	for (const [repo, list] of byRepo) {
 		parts.push("", `## ${repo}`);
 		for (const c of list) {
@@ -239,7 +239,7 @@ function formatComments(comments: DiffComment[]): string {
 			if (c.lineText) parts.push(`  > ${c.lineText.trim()}`);
 		}
 	}
-	parts.push("", "(diff_get with an id for full diff context; diff_mark_sent to consume.)");
+	parts.push("", "(comment_get with an id for full diff context; comment_mark_sent to consume.)");
 	return parts.join("\n");
 }
 
@@ -591,10 +591,10 @@ export default function commentsWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "diff_pending",
-		label: "Diff Pending Comments",
+		name: "comment_pending",
+		label: "Pending Comments",
 		description:
-			"List NEW (not yet submitted) diff-review comments for the current repo from cmux's diff viewer and live Hunk sessions. Read-only: does not advance the sent pointer. Use diff_mark_sent to consume.",
+			"List NEW (not yet submitted) review comments for the current repo from cmux's diff viewer and live Hunk sessions. Read-only: does not advance the sent pointer. Use comment_mark_sent to consume.",
 		parameters: pendingSchema,
 		async execute(_id, params: PendingParams, _signal, _onUpdate, ctx) {
 			const repo = await resolveRepoOrThrow(ctx, params.repo);
@@ -604,10 +604,10 @@ export default function commentsWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "diff_all",
-		label: "All Diff Comments",
+		name: "comment_all",
+		label: "All Comments",
 		description:
-			"List every stored diff-review comment for a repo (or all repos with scope:'all'), from cmux's diff viewer and live Hunk sessions, annotated sent: true|false relative to this session's pointer.",
+			"List every stored review comment for a repo (or all repos with scope:'all'), from cmux's diff viewer and live Hunk sessions, annotated sent: true|false relative to this session's pointer.",
 		parameters: allSchema,
 		async execute(_id, params: AllParams, _signal, _onUpdate, ctx) {
 			const repos = await reposForScope(ctx, params.scope ?? "repo", params.repo);
@@ -629,8 +629,8 @@ export default function commentsWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "diff_cmux_all",
-		label: "All cmux Diff Comments",
+		name: "comment_cmux_all",
+		label: "All cmux Comments",
 		description: "Raw dump of every comment stored by cmux's diff viewer (files under ~/Library/Application Support/cmux/diff-comments/). scope:'all' reads every repo's store.",
 		parameters: cmuxAllSchema,
 		async execute(_id, params: AllParams, _signal, _onUpdate, ctx) {
@@ -641,7 +641,7 @@ export default function commentsWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "diff_hunk_all",
+		name: "comment_hunk_all",
 		label: "All Hunk Comments",
 		description: "Every comment from live Hunk review sessions matching the repo (hunk session comment list --json). Empty when no Hunk session is running.",
 		parameters: hunkAllSchema,
@@ -653,9 +653,9 @@ export default function commentsWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "diff_get",
-		label: "Get Diff Comments By Id",
-		description: "Fetch full diff-review comment records (including cmux submissionText diff context) by id. Ids come from diff_pending/diff_all ('cmux:<uuid>' or 'hunk:<id>').",
+		name: "comment_get",
+		label: "Get Comments By Id",
+		description: "Fetch full review comment records (including cmux submissionText diff context) by id. Ids come from comment_pending/comment_all ('cmux:<uuid>' or 'hunk:<id>').",
 		parameters: getSchema,
 		async execute(_id, params: GetParams, _signal, _onUpdate, ctx) {
 			const wanted = new Set(params.ids);
@@ -675,9 +675,9 @@ export default function commentsWatch(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "diff_mark_sent",
-		label: "Mark Diff Comments Sent",
-		description: "Advance the sent pointer: mark diff-review comments as submitted for this session so diff_pending and /comments-watch stop re-reporting them. Pass ids, or all:true to consume everything stored for the repo.",
+		name: "comment_mark_sent",
+		label: "Mark Comments Sent",
+		description: "Advance the sent pointer: mark review comments as submitted for this session so comment_pending and /comments-watch stop re-reporting them. Pass ids, or all:true to consume everything stored for the repo.",
 		parameters: markSentSchema,
 		async execute(_id, params: MarkSentParams, _signal, _onUpdate, ctx) {
 			const repo = await resolveRepoOrThrow(ctx, params.repo);
