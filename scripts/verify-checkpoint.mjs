@@ -16,6 +16,7 @@ const piCheckpoint = prepareCheckpoint({
   resume: "pi --resume pi-session",
 });
 assert.equal(piCheckpoint.checkpointFile, path.join(checkpointDir, "checkpoint-skill.md"));
+assert.equal(piCheckpoint.changelogFile, path.join(root, "CHANGELOG.md"));
 assert.throws(() => prepareCheckpoint({
   cwd: root,
   session: { id: "pi-session", file: "" },
@@ -33,6 +34,7 @@ const ompCheckpoint = prepareCheckpoint({
   touchedFiles: [],
   resume: "omp --resume omp-session",
 });
+assert.equal(ompCheckpoint.changelogFile, path.join(root, "CHANGELOG.md"));
 assert.equal(ompCheckpoint.checkpointFile, existing);
 assert.equal(ompCheckpoint.resume, "omp --resume omp-session");
 console.log("checkpoint shared behavior verified");

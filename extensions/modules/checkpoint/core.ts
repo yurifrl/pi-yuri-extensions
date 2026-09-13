@@ -21,6 +21,7 @@ export type PreparedCheckpoint = {
   sessionId: string;
   sessionFile: string;
   checkpointFile: string;
+  changelogFile: string;
   resume: string;
   touchedFiles: readonly string[];
   existing: boolean;
@@ -44,6 +45,7 @@ export function prepareCheckpoint(input: PrepareCheckpointInput): PreparedCheckp
     sessionId: input.session.id,
     sessionFile: input.session.file,
     checkpointFile: prior ?? path.join(directory, `${input.name}.md`),
+    changelogFile: path.join(input.cwd, "CHANGELOG.md"),
     resume: input.resume,
     touchedFiles: input.touchedFiles,
     existing: Boolean(prior),
