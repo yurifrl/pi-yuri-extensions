@@ -106,9 +106,13 @@ const manifest = JSON.parse(await Bun.file("package.json").text());
 const piSkillPath = "./extensions/modules/checkpoint/skills";
 assert.deepEqual(manifest.pi.skills, [piSkillPath]);
 assert.deepEqual(manifest.omp.skills, [piSkillPath]);
-assert.equal(await Bun.file("extensions/modules/checkpoint/skills/checkpoint/SKILL.md").exists(), true);
+assert.equal(await Bun.file("extensions/modules/checkpoint/skills/snapshot/SKILL.md").exists(), true);
 for (const runtime of ["pi", "omp"]) {
   const module = await Bun.file(`extensions/modules/checkpoint/${runtime}.ts`).text();
-  assert.ok(module.includes('"resources_discover"') && module.includes('"skills"'), `${runtime} checkpoint module must register skill discovery`);
+  assert.ok(module.includes('"resources_discover"') && module.includes('"skills"'), `${runtime} snapshot module must register skill discovery`);
+  assert.ok(module.includes('"snapshot_write"'), `${runtime} snapshot module must register snapshot_write`);
+  assert.ok(module.includes('"rewind"') && module.includes('"checkpoint"'), `${runtime} snapshot module must block the built-in checkpoint/rewind tools`);
 }
+assert.equal((await Bun.file("extensions/modules/checkpoint/omp.ts").text()).includes("checkpoint_prepare"), false, "prepare tool must stay removed");
+assert.equal((await Bun.file("extensions/modules/checkpoint/pi.ts").text()).includes("checkpoint_prepare"), false, "prepare tool must stay removed");
 console.log("checkpoint runtime wiring verified");

@@ -1,19 +1,19 @@
 ---
-name: checkpoint
+name: snapshot
 description: "Save durable, AI-readable session context and a truthful changelog entry."
 ---
-# Checkpoint
+# Snapshot
 
 Use this command to preserve the session for a later agent in either Pi or OMP. Optional command guidance is extra context, not a directive to expand scope.
 
-1. Derive a concise kebab-case checkpoint name, a one-sentence session description, and distill the session into bullets.
-2. Call the `checkpoint_save` tool with `name`, `description`, `context` (one paragraph), and the `decisions`, `currentState`, `lessons`, `nextSteps` bullet arrays. The tool writes or updates the session's checkpoint file on disk — do not write that file by hand.
+1. Derive a concise kebab-case snapshot name, a one-sentence session description, and distill the session into bullets.
+2. Call the `snapshot_write` tool with `name`, `description`, `context` (one paragraph), and the `decisions`, `currentState`, `lessons`, `nextSteps` bullet arrays. The tool writes or updates the session's snapshot file on disk — do not write that file by hand.
 3. Call the `changelog_update` tool once with `title`, `category`, and intention-first `bullets` (see the contract below). Call it again only for additional distinct delivered work.
 4. Print a self-contained current-state summary and short chronological timeline.
 
-Do NOT use the runtime's built-in `checkpoint` / `rewind` context tools for this. Those only park or restore conversation context — they write nothing to disk. The checkpoint file and changelog are saved exclusively by `checkpoint_save` and `changelog_update`.
+The runtime's built-in `checkpoint` / `rewind` context tools are blocked by this module — they only park conversation context and write nothing to disk. Session snapshots and the changelog are saved exclusively by `snapshot_write` and `changelog_update`.
 
-A checkpoint is working memory, not a transcript. Retain decisions, constraints, evidence, and open work needed to resume safely. Do not create additional workflows or exit the current agent runtime.
+A snapshot is working memory, not a transcript. Retain decisions, constraints, evidence, and open work needed to resume safely. Do not create additional workflows or exit the current agent runtime.
 
 The changelog is maintained through the `changelog_update` tool, which writes the repo root `CHANGELOG.md` (`<cwd>/CHANGELOG.md`). Never create or edit a `CHANGELOG.md` inside the checkpoints folder (`.agents/checkpoints/`) or any other nested directory; checkpoint files never contain changelog entries.
 
@@ -29,7 +29,7 @@ Template — one `##` section per delivered unit of work, newest first directly 
     - Large exports no longer time out: reports stream as they build instead of being held in memory.
 
     ### Changed
-    - `/checkpoint` now targets the repo-root changelog, so every runtime appends to one shared history.
+    - `/snapshot` now targets the repo-root changelog, so every runtime appends to one shared history.
 
     ### Fixed
     - Statusline band follows the theme again after idle instead of keeping stale colors.

@@ -9,42 +9,23 @@ const touchedFiles = new Set<string>();
 
 export default function checkpoint(pi: ExtensionAPI): void {
   pi.on("resources_discover", async () => ({ skillPaths: [skillPath] }));
-  pi.on("tool_call", (event, ctx) => {
+  pi.on("tool_call", (event) => {
+    if (event.toolName === "checkpoint" || event.toolName === "rewind") {
+      return {
+        block: true,
+        reason: "The built-in checkpoint/rewind context tools are disabled by the snapshot module — they only park conversation context and write nothing to disk. For a session snapshot call `snapshot_write` (writes the session snapshot file) and `changelog_update` (updates the root CHANGELOG.md), or run /snapshot.",
+      };
+    }
     if (event.toolName !== "write" && event.toolName !== "edit") return;
     const file = event.input.path;
     if (typeof file === "string") touchedFiles.add(file);
   });
-
   pi.registerTool({
-    name: "checkpoint_prepare",
-    label: "Prepare Checkpoint",
-    description: "Prepare deterministic session metadata and paths (checkpoint file, changelog file). Prefer checkpoint_save and changelog_update, which write the files.",
+    name: "snapshot_write",
+    label: "Write Snapshot",
+    description: "Create or update this session's snapshot file: YAML frontmatter plus Context/Decisions/Current State/Lessons/Next Steps. Writes to disk.",
     parameters: pi.zod.object({
-      name: pi.zod.string().describe("Kebab-case checkpoint name."),
-      description: pi.zod.string().describe("One-sentence session description for cly."),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId() ?? "ephemeral";
-      const details = prepareCheckpoint({
-        cwd: ctx.cwd,
-        session: {
-          id: sessionId,
-          file: ctx.sessionManager.getSessionFile() ?? "",
-        },
-        name: params.name,
-        touchedFiles: [...touchedFiles],
-        resume: `omp --resume ${sessionId}`,
-      });
-      return { content: [{ type: "text", text: JSON.stringify(details, null, 2) }], details };
-    },
-  });
-
-  pi.registerTool({
-    name: "checkpoint_save",
-    label: "Save Checkpoint",
-    description: "Create or update this session's checkpoint file: YAML frontmatter plus Context/Decisions/Current State/Lessons/Next Steps. Writes to disk.",
-    parameters: pi.zod.object({
-      name: pi.zod.string().describe("Kebab-case checkpoint name."),
+      name: pi.zod.string().describe("Kebab-case snapshot name."),
       description: pi.zod.string().describe("One-sentence session description."),
       context: pi.zod.string().describe("Paragraph: what this session was about and where it stands."),
       decisions: pi.zod.array(pi.zod.string()).describe("Decisions made, one bullet each."),
@@ -88,10 +69,10 @@ export default function checkpoint(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("checkpoint", {
-    description: "Save an AI-readable session checkpoint.",
+  pi.registerCommand("snapshot", {
+    description: "Save an AI-readable session snapshot and changelog entry.",
     handler: async (args, ctx) => {
-      await pi.sendUserMessage(`/skill:checkpoint${args.trim() ? ` ${args.trim()}` : ""}`, {
+      await pi.sendUserMessage(`/skill:snapshot${args.trim() ? ` ${args.trim()}` : ""}`, {
         deliverAs: ctx.isIdle() ? undefined : "followUp",
         expandPromptTemplates: true,
       });
