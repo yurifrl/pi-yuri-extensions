@@ -15,7 +15,7 @@ The runtime's built-in `checkpoint` / `rewind` context tools are blocked by this
 
 A snapshot is working memory, not a transcript. Retain decisions, constraints, evidence, and open work needed to resume safely. Do not create additional workflows or exit the current agent runtime.
 
-The changelog is maintained through the `changelog_update` tool, which writes the repo root `CHANGELOG.md` (`<cwd>/CHANGELOG.md`). Never create or edit a `CHANGELOG.md` inside the checkpoints folder (`.agents/checkpoints/`) or any other nested directory; checkpoint files never contain changelog entries.
+The changelog is maintained through the `changelog_update` tool, which writes the repo root `CHANGELOG.md` (`<cwd>/CHANGELOG.md`). Never create or edit a `CHANGELOG.md` inside the snapshots folder (`.agents/snapshots/`) or any other nested directory; snapshot files never contain changelog entries.
 
 Write for humans, not the diff. Every entry leads with intention: the problem solved, the capability gained, or the behavior that changed for whoever uses this project. Someone who never opened the code should understand what improved. The changelog is a curated summary, not a commit log.
 

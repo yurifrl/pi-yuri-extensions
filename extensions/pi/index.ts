@@ -30,7 +30,7 @@ const MODULE_LOADERS: Record<string, () => Promise<ExtensionModule>> = {
   e: () => import("../modules/e.ts"),
   envs: () => import("../modules/envs.ts"),
   conductor: () => import("../modules/conductor.ts"),
-  checkpoint: () => import("../modules/checkpoint/pi.ts"),
+  snapshot: () => import("../modules/snapshot/pi.ts"),
   budget: () => import("../modules/budget.ts"),
   coderabbit: () => import("../modules/coderabbit/index.ts"),
   ctx: () => import("../modules/ctx.ts"),

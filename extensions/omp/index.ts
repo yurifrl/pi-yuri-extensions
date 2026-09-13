@@ -3,7 +3,7 @@ import { isModuleEnabled, setConfigStore, type ModuleName } from "../modules/con
 import { readOmpConfig, writeOmpConfig, CONFIG_PATH } from "./config.ts";
 import aws from "../modules/aws/index.ts";
 import budget from "../modules/budget.ts";
-import checkpoint from "../modules/checkpoint/omp.ts";
+import snapshot from "../modules/snapshot/omp.ts";
 import coderabbit from "../modules/coderabbit/index.ts";
 import commentsWatch from "./modules/comments-watch.ts";
 import contextLimit from "../modules/ctx.ts";
@@ -34,7 +34,7 @@ type OmpModule = (pi: ExtensionAPI) => void;
 const MODULES: Partial<Record<ModuleName, OmpModule>> = {
   aws,
   budget,
-  checkpoint,
+  snapshot,
   coderabbit,
   continue: continueAfterCompact,
   ctx: contextLimit,

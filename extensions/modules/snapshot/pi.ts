@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareCheckpoint, renderCheckpointMarkdown, upsertChangelogEntry, writeCheckpointFile, type ChangelogCategory } from "./core.ts";
+import { prepareSnapshot, renderSnapshotMarkdown, upsertChangelogEntry, writeSnapshotFile, type ChangelogCategory } from "./core.ts";
 
 const skillPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "skills");
 const touchedFiles = new Set<string>();
@@ -21,7 +21,7 @@ function sessionOf(ctx: unknown): { id: string; file: string } {
   return { id, file };
 }
 
-export default function checkpoint(pi: ExtensionAPI): void {
+export default function snapshot(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName === "checkpoint" || event.toolName === "rewind") {
       return {
@@ -49,16 +49,16 @@ export default function checkpoint(pi: ExtensionAPI): void {
     }),
     async execute(_id, params, _signal, _update, ctx) {
       const session = sessionOf(ctx);
-      const prepared = prepareCheckpoint({
+      const prepared = prepareSnapshot({
         cwd: cwdOf(ctx),
         session,
         name: params.name,
         touchedFiles: [...touchedFiles],
         resume: `pi --resume ${session.id}`,
       });
-      const markdown = renderCheckpointMarkdown(prepared, params, new Date().toISOString().slice(0, 10));
-      writeCheckpointFile(prepared.checkpointFile, markdown);
-      return { content: [{ type: "text", text: JSON.stringify({ checkpointFile: prepared.checkpointFile, updated: prepared.existing }, null, 2) }], details: { checkpointFile: prepared.checkpointFile, updated: prepared.existing } };
+      const markdown = renderSnapshotMarkdown(prepared, params, new Date().toISOString().slice(0, 10));
+      writeSnapshotFile(prepared.snapshotFile, markdown);
+      return { content: [{ type: "text", text: JSON.stringify({ snapshotFile: prepared.snapshotFile, updated: prepared.existing }, null, 2) }], details: { snapshotFile: prepared.snapshotFile, updated: prepared.existing } };
     },
   });
   pi.registerTool({

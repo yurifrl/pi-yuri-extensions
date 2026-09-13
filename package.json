@@ -16,7 +16,7 @@
       "./extensions/pi/index.ts"
     ],
     "skills": [
-      "./extensions/modules/checkpoint/skills"
+      "./extensions/modules/snapshot/skills"
     ]
   },
   "omp": {
@@ -24,7 +24,7 @@
       "./extensions/omp/index.ts"
     ],
     "skills": [
-      "./extensions/modules/checkpoint/skills"
+      "./extensions/modules/snapshot/skills"
     ]
   }
 }

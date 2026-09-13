@@ -1,5 +1,5 @@
 export const MODULE_NAMES = [
-  "checkpoint",
+  "snapshot",
   "envs",
   "editor",
   "save",
@@ -27,7 +27,7 @@ export type ModuleName = (typeof MODULE_NAMES)[number];
 
 export type ModuleConfig = {
   enabled?: boolean;
-  checkpointsDirectory?: string;
+  snapshotsDirectory?: string;
   /** working module: seconds of silence before the elapsed timer starts. */
   graceSeconds?: number;
   /** working module: seconds of silence before the label flips to "Still working…". */
@@ -132,7 +132,7 @@ export type YuriExtensionsConfig = {
 };
 export const DEFAULT_CONFIG: Required<Pick<YuriExtensionsConfig, "modules">> & Partial<YuriExtensionsConfig> = {
   modules: {
-    checkpoint: { enabled: true },
+    snapshot: { enabled: true },
     envs: { enabled: true },
     editor: { enabled: true },
     "session-id": { enabled: true },

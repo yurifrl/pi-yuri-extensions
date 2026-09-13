@@ -1,33 +1,33 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export type CheckpointSession = {
+export type SnapshotSession = {
   id: string;
   file: string;
 };
 
-export type PrepareCheckpointInput = {
+export type PrepareSnapshotInput = {
   cwd: string;
-  session: CheckpointSession;
+  session: SnapshotSession;
   name: string;
   touchedFiles: readonly string[];
   resume: string;
-  checkpointsDirectory?: string;
+  snapshotsDirectory?: string;
 };
 
-export type PreparedCheckpoint = {
+export type PreparedSnapshot = {
   cwd: string;
   project: string;
   sessionId: string;
   sessionFile: string;
-  checkpointFile: string;
+  snapshotFile: string;
   changelogFile: string;
   resume: string;
   touchedFiles: readonly string[];
   existing: boolean;
 };
 
-function existingCheckpoint(directory: string, sessionId: string): string | undefined {
+function existingSnapshot(directory: string, sessionId: string): string | undefined {
   if (!existsSync(directory)) return undefined;
   return readdirSync(directory)
     .filter((name) => name.endsWith(".md"))
@@ -35,16 +35,16 @@ function existingCheckpoint(directory: string, sessionId: string): string | unde
     .find((file) => readFileSync(file, "utf8").includes(`session_id: ${sessionId}`));
 }
 
-export function prepareCheckpoint(input: PrepareCheckpointInput): PreparedCheckpoint {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.name)) throw new Error(`Checkpoint name must be kebab-case: ${input.name}`);
-  const directory = input.checkpointsDirectory ?? path.join(input.cwd, ".agents/checkpoints");
-  const prior = existingCheckpoint(directory, input.session.id);
+export function prepareSnapshot(input: PrepareSnapshotInput): PreparedSnapshot {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.name)) throw new Error(`Snapshot name must be kebab-case: ${input.name}`);
+  const directory = input.snapshotsDirectory ?? path.join(input.cwd, ".agents/snapshots");
+  const prior = existingSnapshot(directory, input.session.id);
   return {
     cwd: input.cwd,
     project: path.basename(input.cwd),
     sessionId: input.session.id,
     sessionFile: input.session.file,
-    checkpointFile: prior ?? path.join(directory, `${input.name}.md`),
+    snapshotFile: prior ?? path.join(directory, `${input.name}.md`),
     changelogFile: path.join(input.cwd, "CHANGELOG.md"),
     resume: input.resume,
     touchedFiles: input.touchedFiles,
@@ -52,7 +52,7 @@ export function prepareCheckpoint(input: PrepareCheckpointInput): PreparedCheckp
   };
 }
 
-export type CheckpointContent = {
+export type SnapshotContent = {
   description: string;
   context: string;
   decisions: readonly string[];
@@ -85,7 +85,7 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function renderCheckpointMarkdown(prepared: PreparedCheckpoint, content: CheckpointContent, created: string): string {
+export function renderSnapshotMarkdown(prepared: PreparedSnapshot, content: SnapshotContent, created: string): string {
   const sections: string[] = [`## Context\n${content.context.trim()}`];
   for (const [heading, items] of [
     ["## Decisions", content.decisions],
@@ -102,7 +102,7 @@ export function renderCheckpointMarkdown(prepared: PreparedCheckpoint, content: 
     `description: ${content.description.trim()}`,
     `session_id: ${prepared.sessionId}`,
     `resume_with: ${prepared.resume}`,
-    `checkpoint_file: ${prepared.checkpointFile}`,
+    `snapshot_file: ${prepared.snapshotFile}`,
     "---",
     "",
     sections.join("\n\n"),
@@ -110,7 +110,7 @@ export function renderCheckpointMarkdown(prepared: PreparedCheckpoint, content: 
   ].join("\n");
 }
 
-export function writeCheckpointFile(file: string, markdown: string): void {
+export function writeSnapshotFile(file: string, markdown: string): void {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, markdown);
 }

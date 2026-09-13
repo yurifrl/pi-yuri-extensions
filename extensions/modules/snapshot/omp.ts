@@ -1,13 +1,13 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareCheckpoint, renderCheckpointMarkdown, upsertChangelogEntry, writeCheckpointFile, type CheckpointContent, type ChangelogInput } from "./core.ts";
+import { prepareSnapshot, renderSnapshotMarkdown, upsertChangelogEntry, writeSnapshotFile, type SnapshotContent, type ChangelogInput } from "./core.ts";
 
 const skillPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "skills");
 
 const touchedFiles = new Set<string>();
 
-export default function checkpoint(pi: ExtensionAPI): void {
+export default function snapshot(pi: ExtensionAPI): void {
   pi.on("resources_discover", async () => ({ skillPaths: [skillPath] }));
   pi.on("tool_call", (event) => {
     if (event.toolName === "checkpoint" || event.toolName === "rewind") {
@@ -33,18 +33,18 @@ export default function checkpoint(pi: ExtensionAPI): void {
       lessons: pi.zod.array(pi.zod.string()).describe("Reusable lessons, one bullet each."),
       nextSteps: pi.zod.array(pi.zod.string()).describe("Open next steps, one bullet each."),
     }),
-    async execute(_id, params: CheckpointContent & { name: string }, _signal, _onUpdate, ctx) {
+    async execute(_id, params: SnapshotContent & { name: string }, _signal, _onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId() ?? "ephemeral";
-      const prepared = prepareCheckpoint({
+      const prepared = prepareSnapshot({
         cwd: ctx.cwd,
         session: { id: sessionId, file: ctx.sessionManager.getSessionFile() ?? "" },
         name: params.name,
         touchedFiles: [...touchedFiles],
         resume: `omp --resume ${sessionId}`,
       });
-      const markdown = renderCheckpointMarkdown(prepared, params, new Date().toISOString().slice(0, 10));
-      writeCheckpointFile(prepared.checkpointFile, markdown);
-      return { content: [{ type: "text", text: JSON.stringify({ checkpointFile: prepared.checkpointFile, updated: prepared.existing }, null, 2) }], details: { checkpointFile: prepared.checkpointFile, updated: prepared.existing } };
+      const markdown = renderSnapshotMarkdown(prepared, params, new Date().toISOString().slice(0, 10));
+      writeSnapshotFile(prepared.snapshotFile, markdown);
+      return { content: [{ type: "text", text: JSON.stringify({ snapshotFile: prepared.snapshotFile, updated: prepared.existing }, null, 2) }], details: { snapshotFile: prepared.snapshotFile, updated: prepared.existing } };
     },
   });
 
