@@ -1,7 +1,8 @@
 /**
  * context-limit component — live context usage against the /ctx cap.
  *
- * Data comes from ctx.getContextUsage() each frame (cheap, session-owned); no timers. Threshold coloring:
+ * Data comes from ctx.getContextUsage() each frame (cheap, session-owned); no timers. The cap comes from
+ * ctxLimitSignal (modules/ctx.ts) so /ctx changes show on the next frame. Threshold coloring:
  * >50% warning, >75% error, unless a color is configured. Also publishes pressure into the host aggregate
  * for the indicator.
  */
@@ -17,6 +18,7 @@ export interface ContextLimitConfig {
 type StatuslineColor = Parameters<StatuslineTheme["fg"]>[0];
 
 type ContextSource = (() => ExtensionContext | undefined) | undefined;
+type LimitSource = (() => number | undefined) | undefined;
 
 const component: StatuslineComponent<ContextLimitConfig> = {
 	name: "contextLimit",
@@ -31,7 +33,7 @@ const component: StatuslineComponent<ContextLimitConfig> = {
 		const ctx = currentCtx?.();
 		const usage = ctx?.getContextUsage();
 		const tokens = usage?.tokens ?? undefined;
-		const limit = ctxLimit;
+		const limit = ctxLimit?.();
 		if (tokens === undefined || !limit) return "";
 		const percent = (tokens / limit) * 100;
 		const text = `󰆧 ${percent.toFixed(0)}% ${Math.round(tokens / 1_000)}k/${Math.round(limit / 1_000)}`;
@@ -43,9 +45,9 @@ const component: StatuslineComponent<ContextLimitConfig> = {
 
 // Live-context slot shared with the host aggregate; index.ts keeps it pointed at the current session.
 let currentCtx: ContextSource;
-let ctxLimit: number | undefined;
+let ctxLimit: LimitSource;
 
-export function publishContextSource(ctx: ContextSource, limit: number | undefined): void {
+export function publishContextSource(ctx: ContextSource, limit: LimitSource): void {
 	currentCtx = ctx;
 	ctxLimit = limit;
 }

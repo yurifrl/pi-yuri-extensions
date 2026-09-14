@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-14 Statusline context cap follows /ctx immediately
+
+### Fixed
+- The statusline contextLimit segment froze on the session-start cap: `/ctx set` (and the visual picker) updated the config file but the widget kept rendering the old limit until the next session. The cap now flows through a live `ctxLimitSignal` (exported by `extensions/modules/ctx.ts` next to `ctxCompaction`), which the component reads per frame — a change with `/ctx` shows up on the next statusline render, and the indicator's pressure percentage follows the same live value.
+
 ## 2026-09-13 LLM tools renamed diff_* to comment_*
 
 ### Changed

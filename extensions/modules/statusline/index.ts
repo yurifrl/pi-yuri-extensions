@@ -18,6 +18,7 @@ import type { ComponentHost, HostAggregate, StatuslineTheme } from "./types.ts";
 import { publishIndicatorHost } from "./components/indicator.ts";
 import { publishContextSource } from "./components/context-limit.ts";
 import { publishModelContext } from "./components/model.ts";
+import { ctxLimitSignal } from "../ctx.ts";
 
 type ParsedConfig = { enabled: boolean } & Record<string, unknown>;
 
@@ -27,7 +28,6 @@ export default function statusline(pi: ExtensionAPI): void {
 	let redrawing: (() => void) | undefined;
 	let teardowns: (() => void)[] = [];
 	let latestCtx: ExtensionContext | undefined;
-	let ctxLimit: number | undefined;
 	let order: StatuslineComponentName[] = STATUSLINE_DEFAULT_ORDER;
 	let prefixCfg: NonNullable<StatuslineConfig["prefix"]> = "state";
 	let theme: StatuslineTheme | undefined;
@@ -36,14 +36,16 @@ export default function statusline(pi: ExtensionAPI): void {
 	let attentionCount = 0;
 
 	const ctxSlot = (): ExtensionContext | undefined => latestCtx;
+	const limitSlot = (): number | undefined => ctxLimitSignal.limit;
 
 	const aggregate = (): HostAggregate => {
 		const tokens = latestCtx?.getContextUsage()?.tokens ?? undefined;
+		const limit = ctxLimitSignal.limit;
 		return {
 			working,
 			refreshing: refreshingCount > 0,
 			attention: attentionCount > 0,
-			pressurePercent: tokens !== undefined && ctxLimit ? (tokens / ctxLimit) * 100 : undefined,
+			pressurePercent: tokens !== undefined && limit ? (tokens / limit) * 100 : undefined,
 		};
 	};
 
@@ -64,7 +66,6 @@ export default function statusline(pi: ExtensionAPI): void {
 	function parseAllConfigs(): void {
 		const shared = readSharedConfig();
 		const statuslineConfig = shared.statusline ?? {};
-		ctxLimit = shared.ctxLimit;
 		prefixCfg = statuslineConfig.prefix ?? "state";
 		order = statuslineConfig.order ?? STATUSLINE_DEFAULT_ORDER;
 		const names = new Set<string>(order);
@@ -124,8 +125,9 @@ export default function statusline(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		parseAllConfigs();
 		latestCtx = ctx;
-		// Publish live-context slots the pure component render() fns read; republished on every session event.
-		publishContextSource(ctxSlot, ctxLimit);
+		// Publish live-context slots the pure component render() fns read; the cap flows through ctxLimitSignal,
+		// so /ctx changes show on the next frame.
+		publishContextSource(ctxSlot, limitSlot);
 		publishModelContext(ctxSlot);
 		if (!ctx.hasUI) return;
 		ctx.ui.setWidget(
@@ -152,7 +154,7 @@ export default function statusline(pi: ExtensionAPI): void {
 	const widenedPi = pi as unknown as { on(event: string, handler: (event: never, ctx: ExtensionContext) => void): void };
 	widenedPi.on("session_switch", (_event, ctx) => {
 		latestCtx = ctx;
-		publishContextSource(ctxSlot, ctxLimit);
+		publishContextSource(ctxSlot, limitSlot);
 		publishModelContext(ctxSlot);
 		stopComponents();
 		if (ctx.hasUI) startComponents();

@@ -60,6 +60,13 @@ export const ctxCompaction = {
 	fromCap: false,
 };
 
+/** Shared with the statusline contextLimit component: read per frame so /ctx changes render immediately. */
+export const ctxLimitSignal = {
+	get limit(): number | undefined {
+		return limit;
+	},
+};
+
 function persist(): void {
 	writeSharedConfig({ ...readSharedConfig(), ctxLimit: limit, ctxLimitAction: action });
 }
