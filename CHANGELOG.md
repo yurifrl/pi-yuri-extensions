@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-14 /ctx applies the cap to the session model window
+
+### Fixed
+- `/ctx` only bookkept the cap — the context bar kept rendering the real catalog window (11% / 1.3M never moved). With action `compact`, the cap now also patches the live session model via `setModel` (session-scoped clone; model config is never written): the context bar, `/context` and the compaction budget all follow, and omp's native auto-compaction fires near the cap. `/ctx off` and `stop` restore the catalog window (stop keeps the real window so native compaction can't preempt the turn-end stop). The persisted cap re-applies on `session_start`, `before_agent_start` re-syncs after a model switch, and `/ctx status` reports session window vs catalog. Verified end-to-end on omp 18.1.21 via RPC: 1310720 → 200000 → off → 1310720 → stop/64k keeps 1310720 → compact re-patches 64000.
+
 ## 2026-09-14 Statusline context cap follows /ctx immediately
 
 ### Fixed

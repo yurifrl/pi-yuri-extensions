@@ -7,6 +7,11 @@
  *
  * /ctx — visual picker (arrows ±50k, digits = thousands, "o" off) · /ctx set 100k|1m · /ctx action compact|stop ·
  * /ctx status · /ctx off. Persists ctxLimit and ctxLimitAction in pi-yuri-extensions.json. Disable: "modules": { "ctx": false }.
+ *
+ * With action "compact" the cap is ALSO applied to the live session model (setModel clone): the context bar,
+ * /context and the compaction budget all derive from session.model, so they track the cap, and omp's native
+ * auto-compaction fires near it. With action "stop" the real window is kept — a patched window would let
+ * native auto-compaction preempt the turn-end stop.
  */
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { readSharedConfig, writeSharedConfig } from "./config.ts";
@@ -18,6 +23,8 @@ const MAX_LIMIT = 2_000_000;
 let limit: number | undefined;
 let action: LimitAction = "compact";
 let armed = true;
+/** Catalog window of the patched model, captured before the first patch (fallback when the registry lookup misses). */
+let originalWindow: number | undefined;
 
 function parseTokens(value: string): number | undefined {
 	const match = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(value.trim());
@@ -70,11 +77,29 @@ export const ctxLimitSignal = {
 function persist(): void {
 	writeSharedConfig({ ...readSharedConfig(), ctxLimit: limit, ctxLimitAction: action });
 }
+/** Catalog window for the live model: the registry's entry (modelOverrides applied), falling back to the
+ * window captured before the first patch, then to the live window itself. */
+function pristineWindow(ctx: ExtensionContext): number | undefined {
+	const model = ctx.model;
+	if (!model) return undefined;
+	const registered = ctx.modelRegistry.getAvailable().find(
+		(candidate) => candidate.provider === model.provider && candidate.id === model.id,
+	);
+	return registered?.contextWindow ?? originalWindow ?? model.contextWindow;
+}
+
+/** " · session window X (catalog Y)" when the live window differs from the catalog window. */
+function windowNote(ctx: ExtensionContext): string {
+	const model = ctx.model;
+	const catalog = pristineWindow(ctx);
+	if (!model || catalog === undefined || model.contextWindow === catalog) return "";
+	return ` · session window ${formatTokens(model.contextWindow)} (catalog ${formatTokens(catalog)})`;
+}
 
 async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
 	const usage = ctx.getContextUsage();
 	const currentTokens = usage?.tokens;
-	const max = usage?.contextWindow ?? ctx.model?.contextWindow ?? MAX_LIMIT;
+	const max = pristineWindow(ctx) ?? usage?.contextWindow ?? MAX_LIMIT;
 	const initial = Math.min(limit ?? 0, max);
 	return ctx.ui.custom(
 		(tui, theme, _keys, done) => {
@@ -137,11 +162,35 @@ async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
 }
 
 export default function contextLimit(pi: ExtensionAPI): void {
-	pi.on("session_start", () => {
+	/**
+	 * Apply the cap to the live session model: with action "compact" the model's contextWindow becomes the
+	 * cap so the context bar, /context and the compaction budget track it. "stop" restores the catalog
+	 * window — native auto-compaction would otherwise preempt the turn-end stop. No-op when already in sync.
+	 */
+	async function syncWindow(ctx: ExtensionContext): Promise<void> {
+		const model = ctx.model;
+		if (!model) return;
+		const catalog = pristineWindow(ctx) ?? model.contextWindow;
+		const desired = limit !== undefined && action === "compact" ? limit : catalog;
+		if (model.contextWindow === desired) return;
+		const ok = await pi.setModel({ ...model, contextWindow: desired });
+		if (!ok) {
+			ctx.ui.notify("Could not change the session model window (no API key) — the cap still applies at turn end.", "warning");
+			return;
+		}
+		originalWindow = originalWindow ?? catalog;
+	}
+	pi.on("session_start", async (_event, ctx) => {
 		const config = readSharedConfig();
 		limit = config.ctxLimit;
 		action = config.ctxLimitAction ?? "compact";
 		armed = true;
+		originalWindow = undefined;
+		await syncWindow(ctx);
+	});
+	// Sticky: re-sync after a model switch so the window tracks the cap again (/model away and back).
+	pi.on("before_agent_start", async (_event, ctx) => {
+		await syncWindow(ctx);
 	});
 	pi.on("turn_end", (_event, ctx) => {
 		if (limit === undefined) return;
@@ -185,7 +234,7 @@ export default function contextLimit(pi: ExtensionAPI): void {
 				if (selected === null) return;
 				limit = selected || undefined;
 			} else if (command === "status") {
-				ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}`, "info");
+				ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}`, "info");
 				return;
 			} else if (command === "off") limit = undefined;
 			else if (command === "set") {
@@ -202,7 +251,8 @@ export default function contextLimit(pi: ExtensionAPI): void {
 			}
 			armed = true;
 			persist();
-			ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}`, "info");
+			await syncWindow(ctx);
+			ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}`, "info");
 		},
 	});
 }

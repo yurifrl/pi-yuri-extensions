@@ -1,6 +1,6 @@
 {
   "name": "pi-yuri-extensions",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "Pi package: pi-yuri-extensions toggleable extension hub + zellij notifications",
