@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-16 Statusline sessionMemory segment
+
+### Added
+- `sessionMemory` statusline component renders the current session's memory consumption as `󰍛 412M` / `󰍛 1.2G` — process RSS sampled in-process (the extension runs inside the agent's process, so no subprocess) on a session-scoped interval. Config block `statusline.components.sessionMemory` (`enabled`, `color`, `refreshMs`); defaults enabled, placed between `sessionCost` and `aws` in the default order.
+
 ## 2026-09-16 /ctx is session-scoped; /ctx global persists
 
 ### Changed

@@ -40,7 +40,7 @@ export type ModuleConfig = {
   sources?: { cmux?: boolean; hunk?: boolean };
 };
 
-export const STATUSLINE_COMPONENT_NAMES = ["indicator", "model", "contextLimit", "budget", "sessionCost", "aws", "kube"] as const;
+export const STATUSLINE_COMPONENT_NAMES = ["indicator", "model", "contextLimit", "budget", "sessionCost", "sessionMemory", "aws", "kube"] as const;
 export const STATUSLINE_COLORS = [
   "accent",
   "success",
@@ -79,6 +79,7 @@ export const STATUSLINE_DEFAULT_ORDER: StatuslineComponentName[] = [
   "contextLimit",
   "budget",
   "sessionCost",
+  "sessionMemory",
   "aws",
   "kube",
 ];

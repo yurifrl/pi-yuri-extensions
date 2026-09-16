@@ -6,5 +6,6 @@ import "./components/model.ts";
 import "./components/context-limit.ts";
 import "./components/budget.ts";
 import "./components/session-cost.ts";
+import "./components/session-memory.ts";
 import "./components/aws.ts";
 import "./components/kube.ts";
