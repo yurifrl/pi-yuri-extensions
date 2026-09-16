@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-16 /ctx is session-scoped; /ctx global persists
+
+### Changed
+- Plain `/ctx` (picker, `set`, `off`, `action`) now applies the cap to the current session only — it no longer writes `pi-yuri-extensions.json`, so other sessions and the next session keep the global cap. `/ctx global …` runs the same subcommands and additionally saves limit + action to `pi-yuri-extensions.json` as the default every new session loads (`session_start`). `/ctx status` reports both scopes; the global picker seeds from the persisted value.
+
 ## 2026-09-14 /ctx applies the cap to the session model window
 
 ### Fixed

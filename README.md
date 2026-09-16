@@ -63,7 +63,7 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 | `working` | `debug` | `false` | Log event/timer diagnostics to the omp log. |
 | `notifications` | `events.<id>` | per event | Per-event banner on/off. Event ids: `promptedInput`, `dangerousCommand` (yolo only), `blockedCommand`, `question`, `agentError`, `toolError`. |
 | `budgetGates` | `[]` | Toolkit top-level: USD spend gates applied to every session; set via `/budget`. |
-| `ctxLimit` / `ctxLimitAction` | unset / `compact` | Toolkit top-level: artificial context cap and the action at the cap; set via `/ctx`. |
+| `ctxLimit` / `ctxLimitAction` | unset / `compact` | Toolkit top-level: artificial context cap and the action at the cap — the default every new session loads. Set via `/ctx global …`; plain `/ctx …` applies to the current session only. |
 | `continueAfterCompactPrompt` | built-in | Toolkit top-level: prompt re-sent after automatic maintenance compaction. |
 | `statusline` | all | Toolkit top-level: `prefix` (`state` glyph / `none` / literal), `order` (component names), `components.<name>` per-component blocks (`enabled`, `color`, plus component-specific fields). Legacy `segments` arrays are migrated on read. |
 

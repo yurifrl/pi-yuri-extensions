@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { setConfigStore } from "./config.ts";
+import { setConfigStore, type YuriExtensionsConfig } from "./config.ts";
 import contextLimit, { ctxLimitSignal } from "./ctx.ts";
 
 type Handler = (event: unknown, ctx: unknown) => void | Promise<void>;
@@ -74,6 +74,16 @@ function makePi(): CtxHarness {
 describe("/ctx command", () => {
 	let harness: CtxHarness;
 
+	/** In-memory shared-config store: mirrors the JSON file's read/write round-trip. */
+	function memoryStore(initial: Partial<YuriExtensionsConfig> = {}): Partial<YuriExtensionsConfig> {
+		const state: Partial<YuriExtensionsConfig> = { modules: {}, ...initial };
+		setConfigStore({
+			read: () => state,
+			write: (config) => Object.assign(state, config),
+		});
+		return state;
+	}
+
 	beforeEach(() => {
 		setConfigStore({ read: () => ({ modules: {} }), write: () => {} });
 		harness = makePi();
@@ -89,12 +99,56 @@ describe("/ctx command", () => {
 		expect(ctxLimitSignal.limit).toBeUndefined();
 	});
 
-	test("session_start re-reads the persisted cap", async () => {
+	test("session set is not persisted — a new session reverts to the global cap", async () => {
+		memoryStore({ ctxLimit: 250_000, ctxLimitAction: "compact" });
+		await harness.fire("session_start"); // loads the persisted global cap
+		expect(ctxLimitSignal.limit).toBe(250_000);
+
 		await harness.commands.ctx!("set 500k", harness.ctx);
 		expect(ctxLimitSignal.limit).toBe(500_000);
+		expect(harness.notes.at(-1)).toContain("(this session)");
+
+		await harness.fire("session_start");
+		expect(ctxLimitSignal.limit).toBe(250_000); // config still holds the global cap
+	});
+
+	test("global set persists and survives session_start", async () => {
+		const state = memoryStore();
+		await harness.commands.ctx!("global set 500k", harness.ctx);
+		expect(ctxLimitSignal.limit).toBe(500_000);
+		expect(state.ctxLimit).toBe(500_000);
+		expect(harness.notes.at(-1)).toContain("(global, saved)");
+
+		await harness.fire("session_start");
+		expect(ctxLimitSignal.limit).toBe(500_000); // every new session loads the saved cap
+	});
+
+	test("global off clears the persisted cap", async () => {
+		const state = memoryStore({ ctxLimit: 250_000 });
+		await harness.fire("session_start");
+		expect(ctxLimitSignal.limit).toBe(250_000);
+
+		await harness.commands.ctx!("global off", harness.ctx);
+		expect(ctxLimitSignal.limit).toBeUndefined();
+		expect(state.ctxLimit).toBeUndefined();
 
 		await harness.fire("session_start");
 		expect(ctxLimitSignal.limit).toBeUndefined();
+	});
+
+	test("global action persists the cap action", async () => {
+		const state = memoryStore();
+		await harness.commands.ctx!("global action stop", harness.ctx);
+		expect(state.ctxLimitAction).toBe("stop");
+	});
+
+	test("status reports the session cap and the global cap", async () => {
+		memoryStore({ ctxLimit: 250_000, ctxLimitAction: "compact" });
+		await harness.fire("session_start");
+		await harness.commands.ctx!("set 100k", harness.ctx);
+		await harness.commands.ctx!("status", harness.ctx);
+		expect(harness.notes.at(-1)).toContain("100k"); // session cap
+		expect(harness.notes.at(-1)).toContain("250k"); // global cap
 	});
 
 	test("set patches the live session model to the cap", async () => {

@@ -5,8 +5,11 @@
  * deadlock the agent loop — and re-armed on failure so a transient error never disables the cap) and action "stop"
  * aborts the run. The trigger re-arms whenever usage falls back below the limit.
  *
- * /ctx — visual picker (arrows ±50k, digits = thousands, "o" off) · /ctx set 100k|1m · /ctx action compact|stop ·
- * /ctx status · /ctx off. Persists ctxLimit and ctxLimitAction in pi-yuri-extensions.json. Disable: "modules": { "ctx": false }.
+ * /ctx — session-scoped cap: visual picker (arrows ±50k, digits = thousands, "o" off) · /ctx set 100k|1m ·
+ * /ctx action compact|stop · /ctx status · /ctx off. Session-scoped changes are in-memory only — they revert
+ * to the global cap on the next session. /ctx global … runs the same subcommands and additionally persists
+ * ctxLimit and ctxLimitAction in pi-yuri-extensions.json, the default every new session loads (session_start).
+ * /ctx status reports both scopes. Disable: "modules": { "ctx": false }.
  *
  * With action "compact" the cap is ALSO applied to the live session model (setModel clone): the context bar,
  * /context and the compaction budget all derive from session.model, so they track the cap, and omp's native
@@ -17,6 +20,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { readSharedConfig, writeSharedConfig } from "./config.ts";
 
 type LimitAction = "compact" | "stop";
+/** "session" = this session only; "global" = also saved as the default for every new session. */
+type Scope = "session" | "global";
 
 const STEP = 50_000;
 const MAX_LIMIT = 2_000_000;
@@ -96,11 +101,12 @@ function windowNote(ctx: ExtensionContext): string {
 	return ` · session window ${formatTokens(model.contextWindow)} (catalog ${formatTokens(catalog)})`;
 }
 
-async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
+async function pickLimit(ctx: ExtensionContext, scope: Scope): Promise<number | null> {
 	const usage = ctx.getContextUsage();
 	const currentTokens = usage?.tokens;
 	const max = pristineWindow(ctx) ?? usage?.contextWindow ?? MAX_LIMIT;
-	const initial = Math.min(limit ?? 0, max);
+	// The global picker seeds from the persisted default; the session picker from the live session cap.
+	const initial = Math.min((scope === "global" ? readSharedConfig().ctxLimit : limit) ?? 0, max);
 	return ctx.ui.custom(
 		(tui, theme, _keys, done) => {
 			let value = initial;
@@ -145,7 +151,7 @@ async function pickLimit(ctx: ExtensionContext): Promise<number | null> {
 					const typedHint = typed ? theme.fg("accent", `typing: ${typed}k`) : theme.fg("dim", "type digits = k");
 					return [
 						"",
-						`  ${theme.fg("accent", theme.bold("Context limit"))}  ${theme.fg("dim", "compacts when live context reaches the cap")}`,
+						`  ${theme.fg("accent", theme.bold(`Context limit${scope === "global" ? " · global" : ""}`))}  ${theme.fg("dim", "compacts when live context reaches the cap")}`,
 						"",
 						`  ${renderBar(value, max, width)}  ${theme.fg("accent", theme.bold(value ? `${formatTokens(value)} · ${percentage}%` : "OFF"))}`,
 						scale,
@@ -225,34 +231,45 @@ export default function contextLimit(pi: ExtensionAPI): void {
 			ctxCompaction.inFlight = false;
 		}
 	});
-	pi.registerCommand("ctx", {
-		description: "Set an artificial context cap; bare /ctx opens the visual picker",
-		handler: async (args, ctx) => {
-			const [command, value] = args.trim().toLowerCase().split(/\s+/, 2);
-			if (command === undefined || command === "") {
-				const selected = await pickLimit(ctx);
-				if (selected === null) return;
-				limit = selected || undefined;
-			} else if (command === "status") {
-				ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}`, "info");
-				return;
-			} else if (command === "off") limit = undefined;
-			else if (command === "set") {
-				const parsed = parseTokens(value ?? "");
-				if (parsed === undefined) {
-					ctx.ui.notify("Use /ctx set 100k, /ctx set 1m, or /ctx off.", "error");
-					return;
-				}
-				limit = parsed;
-			} else if (command === "action" && (value === "compact" || value === "stop")) action = value;
-			else {
-				ctx.ui.notify("Usage: /ctx [set 100k|action compact|stop|off|status]", "error");
+	/** Command body shared by both scopes: applies the subcommand to the live session, and at scope
+	 * "global" additionally persists limit + action as the default every new session loads. */
+	async function applyLimit(scope: Scope, command: string | undefined, value: string | undefined, ctx: ExtensionContext): Promise<void> {
+		if (command === undefined || command === "") {
+			const selected = await pickLimit(ctx, scope);
+			if (selected === null) return;
+			limit = selected || undefined;
+		} else if (command === "status") {
+			const global = readSharedConfig();
+			ctx.ui.notify(
+				`Context limit (this session): ${formatTokens(limit)} · action: ${action} — global: ${formatTokens(global.ctxLimit)} · action: ${global.ctxLimitAction ?? "compact"}${windowNote(ctx)}`,
+				"info",
+			);
+			return;
+		} else if (command === "off") limit = undefined;
+		else if (command === "set") {
+			const parsed = parseTokens(value ?? "");
+			if (parsed === undefined) {
+				ctx.ui.notify(`Use /ctx${scope === "global" ? " global" : ""} set 100k, /ctx set 1m, or /ctx off.`, "error");
 				return;
 			}
-			armed = true;
-			persist();
-			await syncWindow(ctx);
-			ctx.ui.notify(`Context limit: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}`, "info");
+			limit = parsed;
+		} else if (command === "action" && (value === "compact" || value === "stop")) action = value;
+		else {
+			ctx.ui.notify("Usage: /ctx [set 100k|action compact|stop|off|status] — prefix a subcommand with global to also save it for every session (e.g. /ctx global set 100k).", "error");
+			return;
+		}
+		armed = true;
+		if (scope === "global") persist();
+		await syncWindow(ctx);
+		ctx.ui.notify(`Context limit${scope === "global" ? " (global, saved)" : " (this session)"}: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}`, "info");
+	}
+	pi.registerCommand("ctx", {
+		description: "Artificial context cap for this session — prefix a subcommand with global to persist it for every session",
+		handler: async (args, ctx) => {
+			const parts = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+			const scope: Scope = parts[0] === "global" ? "global" : "session";
+			const [command, value] = scope === "global" ? parts.slice(1) : parts;
+			await applyLimit(scope, command, value, ctx);
 		},
 	});
 }
