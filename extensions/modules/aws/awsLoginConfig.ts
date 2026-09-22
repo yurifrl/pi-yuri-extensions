@@ -5,10 +5,9 @@ import path from "node:path";
 /**
  * OMP-side awsLogin config for the shared aws module.
  *
- * Priority:
- *   1. `modules.aws` block in ~/.omp/agent/extensions/pi-yuri-extensions.json
- *   2. `awsLogin` block in ~/.pi/agent/extensions/pi-yuri-extensions.json
- *      (the same block the pi side reads, so both runtimes share one source)
+ * Reads the `modules.aws` block of ~/.omp/agent/extensions/pi-yuri-extensions.json —
+ * the same fields as the pi-side `awsLogin` block. Returns undefined when the block
+ * is missing or has no profiles; the pi fallback lives in loadAwsLogin().
  */
 
 export type AwsLoginConfig = {
@@ -19,7 +18,6 @@ export type AwsLoginConfig = {
 };
 
 const OMP_CONFIG_PATH = path.join(homedir(), ".omp", "agent", "extensions", "pi-yuri-extensions.json");
-const PI_GLOBAL_CONFIG_PATH = path.join(homedir(), ".pi", "agent", "extensions", "pi-yuri-extensions.json");
 
 function normalize(raw: unknown): AwsLoginConfig | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
@@ -50,8 +48,10 @@ function readJson(pathname: string): unknown {
 }
 
 export function readOmpAwsLogin(): AwsLoginConfig | undefined {
-  const omp = normalize(readJson(OMP_CONFIG_PATH));
-  if (omp && (omp.profiles?.length ?? 0) > 0) return omp;
-  const pi = normalize(readJson(PI_GLOBAL_CONFIG_PATH));
-  return pi && (pi.profiles?.length ?? 0) > 0 ? pi : omp ?? pi;
+  const raw = readJson(OMP_CONFIG_PATH);
+  if (typeof raw !== "object" || raw === null || !("modules" in raw)) return undefined;
+  const { modules } = raw;
+  if (typeof modules !== "object" || modules === null || !("aws" in modules)) return undefined;
+  const omp = normalize(modules.aws);
+  return (omp?.profiles?.length ?? 0) > 0 ? omp : undefined;
 }
