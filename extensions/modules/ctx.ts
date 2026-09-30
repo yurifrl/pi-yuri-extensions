@@ -11,10 +11,12 @@
  * ctxLimit and ctxLimitAction in pi-yuri-extensions.json, the default every new session loads (session_start).
  * /ctx status reports both scopes. Disable: "modules": { "ctx": false }.
  *
- * With action "compact" the cap is ALSO applied to the live session model (setModel clone): the context bar,
- * /context and the compaction budget all derive from session.model, so they track the cap, and omp's native
- * auto-compaction fires near it. With action "stop" the real window is kept — a patched window would let
- * native auto-compaction preempt the turn-end stop.
+ * With action "compact" the live session model's contextWindow is set to windowForCap(cap) — the smallest
+ * window whose native compaction threshold (window − max(15%·window, 16384)) is ≥ the cap — so omp's native
+ * auto-compaction fires exactly when live context reaches the cap. Setting the window to the cap itself would
+ * fire at ~85% of it, because omp subtracts a 15% reserve from the window to derive the trigger. With action
+ * "stop" the catalog window is kept — a patched window would let native auto-compaction preempt the turn-end
+ * stop.
  */
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { readSharedConfig, writeSharedConfig } from "./config.ts";
@@ -25,6 +27,8 @@ type Scope = "session" | "global";
 
 const STEP = 50_000;
 const MAX_LIMIT = 2_000_000;
+/** omp's DEFAULT_RESERVE_TOKENS: fixed part of the native auto-compact reserve (window − max(15%·window, 16384)). */
+const COMPACT_RESERVE_FLOOR = 16_384;
 let limit: number | undefined;
 let action: LimitAction = "compact";
 let armed = true;
@@ -45,6 +49,22 @@ export function formatTokens(tokens: number | null | undefined): string {
 	if (tokens < 1_000) return `${tokens}`;
 	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}m`;
 	return `${Math.round(tokens / 1_000)}k`;
+}
+
+/**
+ * Smallest session window whose native compaction threshold — `window − max(floor(15%·window), 16384)` —
+ * is ≥ the cap, so omp's auto-compaction fires the moment live context reaches the cap instead of ~15% early.
+ * Large caps resolve proportionally (threshold lands exactly on the cap); small caps, where the fixed
+ * 16,384-token reserve floor dominates, resolve to `cap + 16384`.
+ */
+export function windowForCap(cap: number): number {
+	const thresholdOf = (window: number) => window - Math.max(Math.floor(window * 0.15), COMPACT_RESERVE_FLOOR);
+	// The threshold is monotone in the window, and ceil(cap/0.85) always clears the cap, so the minimal
+	// window is guess or guess−1 when the 15% share dominates; below that the fixed floor dominates.
+	const guess = Math.ceil(cap / 0.85);
+	if (thresholdOf(guess - 1) >= cap) return guess - 1;
+	if (thresholdOf(guess) >= cap) return guess;
+	return cap + COMPACT_RESERVE_FLOOR;
 }
 
 function gradient(position: number): string {
@@ -93,11 +113,15 @@ function pristineWindow(ctx: ExtensionContext): number | undefined {
 	return registered?.contextWindow ?? originalWindow ?? model.contextWindow;
 }
 
-/** " · session window X (catalog Y)" when the live window differs from the catalog window. */
+/** " · session window X (catalog Y)" when the live window differs from the catalog window; under a compact
+ * cap the window is inflated by the compaction reserve, so call the reserve out explicitly. */
 function windowNote(ctx: ExtensionContext): string {
 	const model = ctx.model;
 	const catalog = pristineWindow(ctx);
 	if (!model || catalog === undefined || model.contextWindow === catalog) return "";
+	if (limit !== undefined && action === "compact" && model.contextWindow > limit) {
+		return ` · session window ${formatTokens(model.contextWindow)} (${formatTokens(limit)} cap + ${formatTokens(model.contextWindow - limit)} compact reserve · catalog ${formatTokens(catalog)})`;
+	}
 	return ` · session window ${formatTokens(model.contextWindow)} (catalog ${formatTokens(catalog)})`;
 }
 
@@ -169,15 +193,17 @@ async function pickLimit(ctx: ExtensionContext, scope: Scope): Promise<number | 
 
 export default function contextLimit(pi: ExtensionAPI): void {
 	/**
-	 * Apply the cap to the live session model: with action "compact" the model's contextWindow becomes the
-	 * cap so the context bar, /context and the compaction budget track it. "stop" restores the catalog
-	 * window — native auto-compaction would otherwise preempt the turn-end stop. No-op when already in sync.
+	 * Apply the cap to the live session model: with action "compact" the contextWindow becomes windowForCap(cap) —
+	 * the smallest window whose native compaction threshold (window − max(15%·window, 16384)) is ≥ the cap — so
+	 * omp's auto-compaction fires when live context reaches the cap, not ~15% before it. "stop" restores the
+	 * catalog window — a patched window would otherwise let native auto-compaction preempt the turn-end stop.
+	 * No-op when already in sync.
 	 */
 	async function syncWindow(ctx: ExtensionContext): Promise<void> {
 		const model = ctx.model;
 		if (!model) return;
 		const catalog = pristineWindow(ctx) ?? model.contextWindow;
-		const desired = limit !== undefined && action === "compact" ? limit : catalog;
+		const desired = limit !== undefined && action === "compact" ? windowForCap(limit) : catalog;
 		if (model.contextWindow === desired) return;
 		const ok = await pi.setModel({ ...model, contextWindow: desired });
 		if (!ok) {

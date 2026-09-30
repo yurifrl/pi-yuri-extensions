@@ -1,13 +1,13 @@
 /**
  * Behavioral test: /ctx command against a stub ExtensionAPI.
  * The statusline consumes ctxLimitSignal, so the command must update it in place (not only the config file).
- * With action "compact" the cap is also applied to the live session model (setModel clone) so the context
- * bar and compaction budget follow; "stop" must leave the session window untouched.
+ * With action "compact" the cap is applied to the live session model as windowForCap(cap) — the smallest
+ * window whose native compaction threshold reaches the cap; "stop" must leave the session window untouched.
  */
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { setConfigStore, type YuriExtensionsConfig } from "./config.ts";
-import contextLimit, { ctxLimitSignal } from "./ctx.ts";
+import contextLimit, { ctxLimitSignal, windowForCap } from "./ctx.ts";
 
 type Handler = (event: unknown, ctx: unknown) => void | Promise<void>;
 type CommandHandler = (args: string, ctx: unknown) => void | Promise<void>;
@@ -151,10 +151,11 @@ describe("/ctx command", () => {
 		expect(harness.notes.at(-1)).toContain("250k"); // global cap
 	});
 
-	test("set patches the live session model to the cap", async () => {
+	test("set patches the live session model so native compaction fires at the cap", async () => {
 		await harness.commands.ctx!("set 300k", harness.ctx);
-		expect(harness.setModelCalls.at(-1)?.contextWindow).toBe(300_000);
-		expect(harness.model.contextWindow).toBe(300_000); // the bar reads the live session model
+		const window = harness.model.contextWindow;
+		expect(window).toBe(windowForCap(300_000)); // minimal window whose native threshold reaches the cap
+		expect(window - Math.max(Math.floor(window * 0.15), 16_384)).toBeGreaterThanOrEqual(300_000);
 		expect(harness.catalogModel.contextWindow).toBe(CATALOG_WINDOW); // registry entry untouched
 	});
 
@@ -176,7 +177,7 @@ describe("/ctx command", () => {
 		await harness.commands.ctx!("action stop", harness.ctx);
 		await harness.commands.ctx!("set 300k", harness.ctx);
 		await harness.commands.ctx!("action compact", harness.ctx);
-		expect(harness.setModelCalls.at(-1)?.contextWindow).toBe(300_000);
+		expect(harness.setModelCalls.at(-1)?.contextWindow).toBe(windowForCap(300_000));
 	});
 
 	test("session_start re-applies the persisted cap to the session model", async () => {
@@ -184,7 +185,31 @@ describe("/ctx command", () => {
 		harness.resetModel(); // a fresh session starts with the catalog model
 		setConfigStore({ read: () => ({ modules: {}, ctxLimit: 300_000, ctxLimitAction: "compact" }), write: () => {} });
 		await harness.fire("session_start");
-		expect(harness.setModelCalls.at(-1)?.contextWindow).toBe(300_000);
-		expect(harness.model.contextWindow).toBe(300_000);
+		expect(harness.setModelCalls.at(-1)?.contextWindow).toBe(windowForCap(300_000));
+		expect(harness.model.contextWindow).toBe(windowForCap(300_000));
+	});
+});
+
+describe("windowForCap", () => {
+	/** omp's native compaction threshold: window − max(15%·window floor, 16,384 fixed reserve). */
+	const thresholdOf = (window: number) => window - Math.max(Math.floor(window * 0.15), 16_384);
+
+	test("proportional regime: threshold lands exactly on the cap", () => {
+		for (const cap of [100_000, 250_000, 300_000, 500_000, 1_000_000]) {
+			expect(thresholdOf(windowForCap(cap))).toBe(cap);
+		}
+	});
+
+	test("fixed-reserve regime: small caps resolve to cap + 16384", () => {
+		for (const cap of [10_000, 50_000, 92_842]) {
+			expect(windowForCap(cap)).toBe(cap + 16_384);
+			expect(thresholdOf(windowForCap(cap))).toBe(cap);
+		}
+	});
+
+	test("window is minimal — one token smaller no longer reaches the cap", () => {
+		for (const cap of [10_000, 50_000, 92_842, 92_843, 300_000, 1_000_000]) {
+			expect(thresholdOf(windowForCap(cap) - 1)).toBeLessThan(cap);
+		}
 	});
 });
