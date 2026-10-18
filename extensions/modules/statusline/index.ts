@@ -30,7 +30,6 @@ export default function statusline(pi: ExtensionAPI): void {
 	let latestCtx: ExtensionContext | undefined;
 	let order: StatuslineComponentName[] = STATUSLINE_DEFAULT_ORDER;
 	let prefixCfg: NonNullable<StatuslineConfig["prefix"]> = "state";
-	let blankLines = 0;
 	let theme: StatuslineTheme | undefined;
 	let working = false;
 	let refreshingCount = 0;
@@ -68,7 +67,6 @@ export default function statusline(pi: ExtensionAPI): void {
 		const shared = readSharedConfig();
 		const statuslineConfig = shared.statusline ?? {};
 		prefixCfg = statuslineConfig.prefix ?? "state";
-		blankLines = statuslineConfig.blankLines ?? 0;
 		order = statuslineConfig.order ?? STATUSLINE_DEFAULT_ORDER;
 		const names = new Set<string>(order);
 		names.add("indicator"); // prefix always has config even if order omits it
@@ -143,7 +141,7 @@ export default function statusline(pi: ExtensionAPI): void {
 					if (!theme) return [];
 					const prefix = renderPrefix();
 					const parts = prefix ? [prefix, ...renderSegments()] : renderSegments();
-					return renderStatusRow(parts, width, theme, blankLines);
+					return renderStatusRow(parts, width, theme);
 				},
 				};
 			},
