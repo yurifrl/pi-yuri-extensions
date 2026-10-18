@@ -79,6 +79,21 @@ test("migrateStatusline ignores unknown legacy segment names", () => {
 	expect(migrated?.order).toEqual(["aws"]);
 });
 
+test("renderStatusRow appends blank rows under the band only when the row renders", () => {
+	expect(renderStatusRow(["a"], 20, theme, 2)).toEqual([renderStatusRow(["a"], 20, theme)[0], "", ""]);
+	expect(renderStatusRow(["a"], 20, theme)).toHaveLength(1);
+	expect(renderStatusRow(["a"], 0, theme, 3)).toEqual([]);
+});
+
+test("migrateStatusline keeps positive integer blankLines and drops invalid values", () => {
+	expect(migrateStatusline({ blankLines: 1 })).toEqual({ blankLines: 1 });
+	expect(migrateStatusline({ blankLines: 2 })).toEqual({ blankLines: 2 });
+	expect(migrateStatusline({ blankLines: 0 })).toBeUndefined();
+	expect(migrateStatusline({ blankLines: -1 })).toBeUndefined();
+	expect(migrateStatusline({ blankLines: 1.5 })).toBeUndefined();
+	expect(migrateStatusline({ blankLines: "2" })).toBeUndefined();
+});
+
 test("migrateStatusline returns undefined for absent, non-object, and empty values", () => {
 	expect(migrateStatusline(undefined)).toBeUndefined();
 	expect(migrateStatusline("nope")).toBeUndefined();

@@ -12,13 +12,14 @@ const SEPARATOR = String.fromCharCode(0xe0b1);
 // theme.sep.powerlineLeft — the solid taper the native band closes with.
 const END_CAP = String.fromCharCode(0xe0b0);
 
-export function renderStatusRow(segments: string[], width: number, theme: StatuslineTheme): string[] {
+export function renderStatusRow(segments: string[], width: number, theme: StatuslineTheme, blankLines = 0): string[] {
 	const visible = segments.filter((segment) => segment.length > 0);
 	if (visible.length === 0 || width <= 0) return [];
 	const cap = endCap(theme);
 	const sep = theme.fg("statusLineSep", SEPARATOR);
 	const line = truncateToWidth(` ${visible.join(` ${sep} `)} `, width - (cap ? 1 : 0));
-	return [theme.bg("statusLineBg", line) + cap];
+	const row = theme.bg("statusLineBg", line) + cap;
+	return blankLines > 0 ? [row, ...Array<string>(blankLines).fill("")] : [row];
 }
 
 /**

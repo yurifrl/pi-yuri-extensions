@@ -71,6 +71,8 @@ export interface StatuslineConfig {
   order?: StatuslineComponentName[];
   /** Per-component blocks keyed by component name. */
   components?: Partial<Record<StatuslineComponentName, Record<string, unknown>>>;
+  /** Blank rows between the statusline band and the editor; positive integers only (default 0). */
+  blankLines?: number;
 }
 
 export const STATUSLINE_DEFAULT_ORDER: StatuslineComponentName[] = [
@@ -97,6 +99,7 @@ export function migrateStatusline(raw: unknown): StatuslineConfig | undefined {
     prefix: input.prefix,
     order: input.order ? [...input.order] : undefined,
     components: input.components ? { ...input.components } : undefined,
+    blankLines: typeof input.blankLines === "number" && Number.isInteger(input.blankLines) && input.blankLines > 0 ? input.blankLines : undefined,
   };
   if (Array.isArray(input.segments)) {
     const order = migrated.order ?? [];
@@ -115,7 +118,7 @@ export function migrateStatusline(raw: unknown): StatuslineConfig | undefined {
     migrated.order = order;
     migrated.components = components;
   }
-  if (!migrated.prefix && !migrated.order?.length && !migrated.components && !Array.isArray(input.segments)) return undefined;
+  if (!migrated.prefix && !migrated.order?.length && !migrated.components && !migrated.blankLines && !Array.isArray(input.segments)) return undefined;
   return migrated;
 }
 
