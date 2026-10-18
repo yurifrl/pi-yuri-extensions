@@ -2,7 +2,10 @@
  * kube component — current Kubernetes context via `kubectl config current-context`.
  *
  * Refreshes on its own session-scoped interval through the host's live ctx; failure or absence hides the
- * segment. refreshMs/timeoutMs configurable; both validated at session start.
+ * segment. refreshMs/timeoutMs configurable; both validated at session start. `strip` takes regex source
+ * strings applied in order to the context before display — matches are removed, non-matching contexts
+ * pass through unchanged (e.g. `^arn:aws:eks:[^:]+:[0-9]+:cluster/` turns the full EKS ARN into the
+ * bare cluster name); a context stripped to nothing hides the segment.
  */
 import type { StatuslineComponent, StatuslineTheme, ComponentHost } from "../types.ts";
 import { color } from "../types.ts";
@@ -14,6 +17,8 @@ export interface KubeConfig {
 	color: StatuslineColor;
 	refreshMs: number;
 	timeoutMs: number;
+	/** Regex sources applied in order to the fetched context; matches are removed before display. */
+	strip: RegExp[];
 }
 
 type StatuslineColor = Parameters<StatuslineTheme["fg"]>[0];
@@ -49,11 +54,26 @@ const component: StatuslineComponent<KubeConfig> = {
 			if (number !== undefined && (!Number.isFinite(number) || number < 100))
 				throw new Error(`statusline.components.kube.${key} must be a number >= 100`);
 		}
+		let strip: RegExp[] = [];
+		if (input.strip !== undefined) {
+			if (!Array.isArray(input.strip) || !input.strip.every((source) => typeof source === "string" && source.length > 0))
+				throw new Error("statusline.components.kube.strip must be an array of non-empty regex source strings");
+			strip = input.strip.map((source, index) => {
+				try {
+					return new RegExp(source, "g");
+				} catch (cause) {
+					throw new Error(
+						`statusline.components.kube.strip[${index}] is not a valid regex: ${cause instanceof Error ? cause.message : String(cause)}`,
+					);
+				}
+			});
+		}
 		return {
 			enabled: input.enabled !== false,
 			color: color(input.color, "success"),
 			refreshMs: input.refreshMs ?? DEFAULT_REFRESH_MS,
 			timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+			strip,
 		};
 	},
 	start(componentHost, cfg) {
@@ -67,7 +87,10 @@ const component: StatuslineComponent<KubeConfig> = {
 	},
 	render(cfg, theme) {
 		if (!value) return "";
-		return theme.fg(cfg.color, `⎈ ${value}`);
+		let display = value;
+		for (const pattern of cfg.strip) display = display.replace(pattern, "");
+		if (!display) return "";
+		return theme.fg(cfg.color, `⎈ ${display}`);
 	},
 };
 
