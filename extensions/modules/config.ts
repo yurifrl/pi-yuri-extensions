@@ -71,7 +71,11 @@ export interface StatuslineConfig {
   order?: StatuslineComponentName[];
   /** Per-component blocks keyed by component name. */
   components?: Partial<Record<StatuslineComponentName, Record<string, unknown>>>;
-  /** Blank rows between the statusline band and the editor; positive integers only (default 0). */
+  /**
+   * Blank rows between the statusline band and the editor; positive integers only (default 0).
+   * Terminal TUI only. Tern renders its own native statusbar from row 1 and drops extra rows —
+   * no gap is possible there.
+   */
   blankLines?: number;
 }
 
