@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { setConfigStore, type YuriExtensionsConfig } from "./config.ts";
-import contextLimit, { ctxLimitSignal, windowForCap } from "./ctx.ts";
+import contextLimit, { ctxLimitSignal, nextRealRatio, realEstimate, windowForCap } from "./ctx.ts";
 
 type Handler = (event: unknown, ctx: unknown) => void | Promise<void>;
 type CommandHandler = (args: string, ctx: unknown) => void | Promise<void>;
@@ -22,8 +22,9 @@ interface CtxHarness {
 	catalogModel: { contextWindow: number };
 	readonly model: { contextWindow: number };
 	resetModel(): void;
-	fire(event: string): Promise<void>;
+	fire(event: string, payload?: unknown): Promise<void>;
 	ctx: unknown;
+	setGauge(tokens: number | undefined): void;
 }
 
 function makePi(): CtxHarness {
@@ -33,6 +34,7 @@ function makePi(): CtxHarness {
 	const setModelCalls: Array<{ contextWindow: number }> = [];
 	const catalogModel = { provider: "t", id: "t/m", contextWindow: CATALOG_WINDOW };
 	let sessionModel: { contextWindow: number } = catalogModel;
+	let gauge: number | undefined;
 	const pi = {
 		on: (event: string, handler: Handler) => {
 			handlers[event] = handler;
@@ -48,12 +50,13 @@ function makePi(): CtxHarness {
 	} as unknown as ExtensionAPI;
 	const ctx = {
 		ui: { notify: (message: string) => notes.push(message) },
+		getContextUsage: () => (gauge === undefined ? undefined : { tokens: gauge }),
 		get model() {
 			return sessionModel;
 		},
 		modelRegistry: { getAvailable: () => [catalogModel] },
 	};
-	const fire = async (event: string) => handlers[event]?.(undefined, ctx);
+	const fire = async (event: string, payload?: unknown) => handlers[event]?.(payload, ctx);
 	return {
 		pi,
 		commands,
@@ -62,6 +65,9 @@ function makePi(): CtxHarness {
 		catalogModel,
 		fire,
 		ctx,
+		setGauge: (tokens: number | undefined) => {
+			gauge = tokens;
+		},
 		get model() {
 			return sessionModel;
 		},
@@ -188,6 +194,40 @@ describe("/ctx command", () => {
 		expect(harness.setModelCalls.at(-1)?.contextWindow).toBe(windowForCap(300_000));
 		expect(harness.model.contextWindow).toBe(windowForCap(300_000));
 	});
+
+	test("turn_end learns the gauge→real ratio from provider usage and persists it", async () => {
+		const state = memoryStore();
+		harness.setGauge(150_000); // omp's local estimate for this turn
+		await harness.fire("turn_end", { message: { usage: { totalTokens: 50_000 } } }); // provider-true size
+		expect(ctxLimitSignal.realRatio).toBe(3);
+		expect(state.ctxLimitRatio).toBe(3);
+	});
+
+	test("later turns EMA the calibration instead of jumping", async () => {
+		memoryStore();
+		harness.setGauge(150_000);
+		await harness.fire("turn_end", { message: { usage: { totalTokens: 50_000 } } });
+		harness.setGauge(99_000);
+		await harness.fire("turn_end", { message: { usage: { totalTokens: 45_000 } } });
+		expect(ctxLimitSignal.realRatio).toBe(2.8); // 3 + (2.2 − 3) × 0.25
+	});
+
+	test("session_start loads the persisted calibration", async () => {
+		memoryStore({ ctxLimitRatio: 2.5 });
+		await harness.fire("session_start");
+		expect(ctxLimitSignal.realRatio).toBe(2.5);
+	});
+
+	test("unusable samples never poison a good calibration", async () => {
+		memoryStore({ ctxLimitRatio: 2.5 });
+		await harness.fire("session_start");
+		harness.setGauge(150_000);
+		await harness.fire("turn_end", { message: { usage: { totalTokens: 1_000 } } }); // provider total below floor
+		expect(ctxLimitSignal.realRatio).toBe(2.5);
+		harness.setGauge(400_000);
+		await harness.fire("turn_end", { message: { usage: { totalTokens: 20_000 } } }); // ratio 20 outside [1, 10]
+		expect(ctxLimitSignal.realRatio).toBe(2.5);
+	});
 });
 
 describe("windowForCap", () => {
@@ -211,5 +251,32 @@ describe("windowForCap", () => {
 		for (const cap of [10_000, 50_000, 92_842, 92_843, 300_000, 1_000_000]) {
 			expect(thresholdOf(windowForCap(cap) - 1)).toBeLessThan(cap);
 		}
+	});
+});
+
+describe("nextRealRatio", () => {
+	test("first good sample wins outright, later samples EMA in", () => {
+		expect(nextRealRatio(undefined, 150_000, 50_000)).toBe(3);
+		expect(nextRealRatio(3, 99_000, 45_000)).toBe(2.8); // 3 + (2.2 − 3) × 0.25
+	});
+
+	test("unusable samples return the previous calibration untouched", () => {
+		expect(nextRealRatio(2.5, undefined, 50_000)).toBe(2.5); // no gauge
+		expect(nextRealRatio(2.5, 150_000, undefined)).toBe(2.5); // no provider usage
+		expect(nextRealRatio(2.5, 150_000, 1_000)).toBe(2.5); // tiny turn — noise
+		expect(nextRealRatio(2.5, 400_000, 20_000)).toBe(2.5); // ratio outside [1, 10]
+	});
+});
+
+describe("realEstimate", () => {
+	test("divides the gauge by the calibration", () => {
+		expect(realEstimate(300_000, 2.5)).toBe(120_000);
+		expect(realEstimate(150_000, 3)).toBe(50_000);
+	});
+
+	test("uncalibrated or degenerate ratios yield undefined", () => {
+		expect(realEstimate(300_000, undefined)).toBeUndefined();
+		expect(realEstimate(undefined, 2.5)).toBeUndefined();
+		expect(realEstimate(300_000, 1)).toBeUndefined(); // ×1 means "no over-read" — nothing to translate
 	});
 });

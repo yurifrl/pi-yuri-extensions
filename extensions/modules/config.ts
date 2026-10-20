@@ -128,6 +128,8 @@ export type YuriExtensionsConfig = {
   ctxLimit?: number;
   /** ctx module: what happens at the cap. */
   ctxLimitAction?: "compact" | "stop";
+  /** ctx module: learned gauge→real calibration (omp's local estimate ÷ provider usage); display only. */
+  ctxLimitRatio?: number;
   /** continue module: prompt re-sent after automatic maintenance compaction. */
   continueAfterCompactPrompt?: string;
 };

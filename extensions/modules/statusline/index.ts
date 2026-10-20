@@ -37,6 +37,7 @@ export default function statusline(pi: ExtensionAPI): void {
 
 	const ctxSlot = (): ExtensionContext | undefined => latestCtx;
 	const limitSlot = (): number | undefined => ctxLimitSignal.limit;
+	const ratioSlot = (): number | undefined => ctxLimitSignal.realRatio;
 
 	const aggregate = (): HostAggregate => {
 		const tokens = latestCtx?.getContextUsage()?.tokens ?? undefined;
@@ -127,7 +128,7 @@ export default function statusline(pi: ExtensionAPI): void {
 		latestCtx = ctx;
 		// Publish live-context slots the pure component render() fns read; the cap flows through ctxLimitSignal,
 		// so /ctx changes show on the next frame.
-		publishContextSource(ctxSlot, limitSlot);
+		publishContextSource(ctxSlot, limitSlot, ratioSlot);
 		publishModelContext(ctxSlot);
 		if (!ctx.hasUI) return;
 		ctx.ui.setWidget(
@@ -154,7 +155,7 @@ export default function statusline(pi: ExtensionAPI): void {
 	const widenedPi = pi as unknown as { on(event: string, handler: (event: never, ctx: ExtensionContext) => void): void };
 	widenedPi.on("session_switch", (_event, ctx) => {
 		latestCtx = ctx;
-		publishContextSource(ctxSlot, limitSlot);
+		publishContextSource(ctxSlot, limitSlot, ratioSlot);
 		publishModelContext(ctxSlot);
 		stopComponents();
 		if (ctx.hasUI) startComponents();

@@ -34,6 +34,39 @@ let action: LimitAction = "compact";
 let armed = true;
 /** Catalog window of the patched model, captured before the first patch (fallback when the registry lookup misses). */
 let originalWindow: number | undefined;
+/** Learned gauge→real calibration: omp's local estimate ÷ the provider's own usage for the same request.
+ * omp's estimate over-reads every provider (on glm, ×2–3.7), so every cap silently means far less real
+ * context; the calibration turns gauge numbers back into provider-true ones for display. */
+let realRatio: number | undefined;
+
+/** Calibration sampling: ignore tiny turns (noise) and clamp the ratio to a sane band. */
+const RATIO_MIN_PROVIDER = 4_000;
+const RATIO_MIN = 1;
+const RATIO_MAX = 10;
+/** EMA weight for later samples so the calibration tracks content mix without thrashing. */
+const RATIO_ALPHA = 0.25;
+
+/**
+ * Fold one (local gauge, provider-true) sample into the calibration. Unusable samples return the previous
+ * value untouched; the first good sample wins outright, later samples EMA in.
+ */
+export function nextRealRatio(
+	prev: number | undefined,
+	local: number | null | undefined,
+	provider: number | null | undefined,
+): number | undefined {
+	if (!local || !provider || provider < RATIO_MIN_PROVIDER) return prev;
+	const ratio = local / provider;
+	if (!Number.isFinite(ratio) || ratio < RATIO_MIN || ratio > RATIO_MAX) return prev;
+	const base = prev === undefined ? ratio : prev + (ratio - prev) * RATIO_ALPHA;
+	return Math.round(base * 100) / 100;
+}
+
+/** Provider-true tokens a gauge reading corresponds to, or undefined while uncalibrated. */
+export function realEstimate(gauge: number | undefined, ratio: number | undefined): number | undefined {
+	if (gauge === undefined || !ratio || ratio <= RATIO_MIN) return undefined;
+	return Math.round(gauge / ratio);
+}
 
 function parseTokens(value: string): number | undefined {
 	const match = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(value.trim());
@@ -97,6 +130,9 @@ export const ctxLimitSignal = {
 	get limit(): number | undefined {
 		return limit;
 	},
+	get realRatio(): number | undefined {
+		return realRatio;
+	},
 };
 
 function persist(): void {
@@ -123,6 +159,12 @@ function windowNote(ctx: ExtensionContext): string {
 		return ` · session window ${formatTokens(model.contextWindow)} (${formatTokens(limit)} cap + ${formatTokens(model.contextWindow - limit)} compact reserve · catalog ${formatTokens(catalog)})`;
 	}
 	return ` · session window ${formatTokens(model.contextWindow)} (catalog ${formatTokens(catalog)})`;
+}
+
+/** " · ≈Xk real (×R)" — what the cap means in provider-true tokens, once the gauge is calibrated. */
+function realNote(): string {
+	const real = realEstimate(limit, realRatio);
+	return real === undefined ? "" : ` · ≈${formatTokens(real)} real (×${realRatio!.toFixed(1)})`;
 }
 
 async function pickLimit(ctx: ExtensionContext, scope: Scope): Promise<number | null> {
@@ -163,14 +205,17 @@ async function pickLimit(ctx: ExtensionContext, scope: Scope): Promise<number | 
 				render(width: number): string[] {
 					const cells = Math.max(16, Math.min(56, width - 16));
 					const percentage = Math.round((value / max) * 100);
-					const currentPosition =
-						currentTokens == null
-							? undefined
-							: Math.max(0, Math.min(cells - 1, Math.round((currentTokens / max) * (cells - 1))));
-					const marker =
-						currentPosition === undefined
-							? ""
-							: `  ${" ".repeat(currentPosition)}${theme.fg("accent", "▲")} ${theme.fg("dim", `now ${formatTokens(currentTokens)}`)}`;
+					// The axis spans the catalog wall in provider-real tokens. omp's gauge over-reads (×ratio,
+					// 2–3.7 on glm); once calibrated, cap/now markers land at their provider-true positions so
+					// the cap can be read against what the model actually holds instead of the inflated count.
+					const at = (gauge: number) => {
+						const tokens = realRatio === undefined ? gauge : Math.min(gauge / realRatio, max);
+						return Math.max(0, Math.min(cells - 1, Math.round((tokens / max) * (cells - 1))));
+					};
+					const marker = (gauge: number | null | undefined, arrow: string, label: string) =>
+						gauge == null ? "" : `  ${" ".repeat(at(gauge))}${theme.fg("accent", arrow)} ${theme.fg("dim", label)}`;
+					const capReal = realEstimate(value, realRatio);
+					const nowReal = currentTokens == null ? undefined : realEstimate(currentTokens, realRatio);
 					const scale = `  ${theme.fg("dim", "0")}${" ".repeat(Math.max(1, cells - formatTokens(max).length - 1))}${theme.fg("dim", formatTokens(max))}`;
 					const typedHint = typed ? theme.fg("accent", `typing: ${typed}k`) : theme.fg("dim", "type digits = k");
 					return [
@@ -178,8 +223,24 @@ async function pickLimit(ctx: ExtensionContext, scope: Scope): Promise<number | 
 						`  ${theme.fg("accent", theme.bold(`Context limit${scope === "global" ? " · global" : ""}`))}  ${theme.fg("dim", "compacts when live context reaches the cap")}`,
 						"",
 						`  ${renderBar(value, max, width)}  ${theme.fg("accent", theme.bold(value ? `${formatTokens(value)} · ${percentage}%` : "OFF"))}`,
+						marker(
+							value,
+							"▼",
+							capReal === undefined
+								? `cap ${formatTokens(value)}`
+								: `cap ${formatTokens(value)} ≈ ${formatTokens(capReal)} real (×${realRatio!.toFixed(1)})`,
+						),
+						marker(
+							currentTokens,
+							"▲",
+							nowReal === undefined
+								? `now ${formatTokens(currentTokens)}`
+								: `now ${formatTokens(currentTokens)} ≈ ${formatTokens(nowReal)} real`,
+						),
 						scale,
-						marker,
+						realRatio === undefined
+							? `  ${theme.fg("dim", "gauge over-reads ×2–3.7 on glm — real markers calibrate after one turn")}`
+							: "",
 						"",
 						`  ${theme.fg("dim", "↑/→ +50k   ↓/← −50k   ")}${typedHint}${theme.fg("dim", "   o off   enter save   esc cancel")}`,
 						"",
@@ -216,6 +277,7 @@ export default function contextLimit(pi: ExtensionAPI): void {
 		const config = readSharedConfig();
 		limit = config.ctxLimit;
 		action = config.ctxLimitAction ?? "compact";
+		realRatio = config.ctxLimitRatio;
 		armed = true;
 		originalWindow = undefined;
 		await syncWindow(ctx);
@@ -224,9 +286,20 @@ export default function contextLimit(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", async (_event, ctx) => {
 		await syncWindow(ctx);
 	});
-	pi.on("turn_end", (_event, ctx) => {
-		if (limit === undefined) return;
+	pi.on("turn_end", (event, ctx) => {
 		const usage = ctx.getContextUsage();
+		// Learn the gauge→real calibration from this turn: provider-true usage (assistant message) vs
+		// omp's local estimate for the same moment. Persist when it drifts far enough to matter.
+		const message = (event as unknown as { message?: { usage?: { totalTokens?: number } } } | undefined)?.message;
+		const calibrated = nextRealRatio(realRatio, usage?.tokens, message?.usage?.totalTokens);
+		if (calibrated !== realRatio) {
+			realRatio = calibrated;
+			const stored = readSharedConfig().ctxLimitRatio;
+			if (realRatio !== undefined && (stored === undefined || Math.abs(realRatio - stored) >= 0.05)) {
+				writeSharedConfig({ ...readSharedConfig(), ctxLimitRatio: realRatio });
+			}
+		}
+		if (limit === undefined) return;
 		if (usage === undefined || usage.tokens === null || usage.tokens < limit) {
 			armed = true;
 			return;
@@ -267,7 +340,7 @@ export default function contextLimit(pi: ExtensionAPI): void {
 		} else if (command === "status") {
 			const global = readSharedConfig();
 			ctx.ui.notify(
-				`Context limit (this session): ${formatTokens(limit)} · action: ${action} — global: ${formatTokens(global.ctxLimit)} · action: ${global.ctxLimitAction ?? "compact"}${windowNote(ctx)}`,
+				`Context limit (this session): ${formatTokens(limit)} · action: ${action} — global: ${formatTokens(global.ctxLimit)} · action: ${global.ctxLimitAction ?? "compact"}${windowNote(ctx)}${realNote()}`,
 				"info",
 			);
 			return;
@@ -287,7 +360,7 @@ export default function contextLimit(pi: ExtensionAPI): void {
 		armed = true;
 		if (scope === "global") persist();
 		await syncWindow(ctx);
-		ctx.ui.notify(`Context limit${scope === "global" ? " (global, saved)" : " (this session)"}: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}`, "info");
+		ctx.ui.notify(`Context limit${scope === "global" ? " (global, saved)" : " (this session)"}: ${formatTokens(limit)} · action: ${action}${windowNote(ctx)}${realNote()}`, "info");
 	}
 	pi.registerCommand("ctx", {
 		description: "Artificial context cap for this session — prefix a subcommand with global to persist it for every session",

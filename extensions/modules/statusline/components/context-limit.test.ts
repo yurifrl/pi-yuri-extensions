@@ -39,4 +39,11 @@ describe("contextLimit component", () => {
 		publishContextSource(() => undefined, () => 200_000);
 		expect(component.render(cfg, theme)).toBe("");
 	});
+
+	test("appends the real-context estimate once calibrated", () => {
+		publishContextSource(() => fakeUsage(36_000), () => 300_000, () => 2.5);
+		const component = getComponent("contextLimit")!;
+		const cfg = component.parseConfig({}, {} as never);
+		expect(component.render(cfg, theme)).toContain("≈14k"); // 36k gauge ÷ 2.5 ≈ 14.4k real
+	});
 });
