@@ -65,7 +65,7 @@ Configure OMP modules in `~/.omp/agent/extensions/pi-yuri-extensions.json`; omit
 | `budgetGates` | `[]` | Toolkit top-level: USD spend gates applied to every session; set via `/budget`. |
 | `ctxLimit` / `ctxLimitAction` | unset / `compact` | Toolkit top-level: artificial context cap and the action at the cap — the default every new session loads. Set via `/ctx global …`; plain `/ctx …` applies to the current session only. |
 | `continueAfterCompactPrompt` | built-in | Toolkit top-level: prompt re-sent after automatic maintenance compaction. |
-| `statusline` | all | Toolkit top-level: `prefix` (`state` glyph / `none` / literal), `order` (component names), `components.<name>` per-component blocks (`enabled`, `color`, plus component-specific fields). Legacy `segments` arrays are migrated on read. |
+| `statusline` | all | Toolkit top-level: `prefix` (`state` glyph / `none` / literal), `hideInTern` (`true` skips the widget inside Tern, where the `tern-statusline` plugin owns the status bar), `order` (component names), `components.<name>` per-component blocks (`enabled`, `color`, plus component-specific fields). Legacy `segments` arrays are migrated on read. |
 
 `nudge`, `envs`, `editor`, and `session-id` take no options. `envs` profile switching is runtime-only via `/envs work|personal|all|status`.
 

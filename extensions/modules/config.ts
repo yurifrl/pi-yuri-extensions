@@ -67,6 +67,8 @@ export interface StatuslineComponentConfig {
 export interface StatuslineConfig {
   /** "state" (default) | "none" | literal prefix glyph. */
   prefix?: StatuslinePrefix;
+  /** true: don't render the widget inside Tern (the tern-statusline plugin owns the status bar there). */
+  hideInTern?: boolean;
   /** Render order; every name must be a registered component. */
   order?: StatuslineComponentName[];
   /** Per-component blocks keyed by component name. */
@@ -95,6 +97,7 @@ export function migrateStatusline(raw: unknown): StatuslineConfig | undefined {
   const input = raw as Record<string, unknown> & Partial<StatuslineConfig>;
   const migrated: StatuslineConfig = {
     prefix: input.prefix,
+    hideInTern: input.hideInTern === true ? true : undefined,
     order: input.order ? [...input.order] : undefined,
     components: input.components ? { ...input.components } : undefined,
   };
@@ -115,7 +118,7 @@ export function migrateStatusline(raw: unknown): StatuslineConfig | undefined {
     migrated.order = order;
     migrated.components = components;
   }
-  if (!migrated.prefix && !migrated.order?.length && !migrated.components && !Array.isArray(input.segments)) return undefined;
+  if (!migrated.prefix && !migrated.hideInTern && !migrated.order?.length && !migrated.components && !Array.isArray(input.segments)) return undefined;
   return migrated;
 }
 

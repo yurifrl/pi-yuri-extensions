@@ -89,3 +89,9 @@ test("migrateStatusline returns undefined for absent, non-object, and empty valu
 test("default order covers every documented component", () => {
 	expect(STATUSLINE_DEFAULT_ORDER).toEqual(["indicator", "model", "contextLimit", "budget", "sessionCost", "sessionMemory", "aws", "kube"]);
 });
+
+test("migrateStatusline keeps hideInTern only when explicitly true", () => {
+	expect(migrateStatusline({ hideInTern: true })?.hideInTern).toBe(true);
+	expect(migrateStatusline({ hideInTern: false })?.hideInTern).toBeUndefined();
+	expect(migrateStatusline({ hideInTern: "yes" })?.hideInTern).toBeUndefined();
+});

@@ -131,6 +131,7 @@ export default function statusline(pi: ExtensionAPI): void {
 		publishContextSource(ctxSlot, limitSlot, ratioSlot);
 		publishModelContext(ctxSlot);
 		if (!ctx.hasUI) return;
+		if (readSharedConfig().statusline?.hideInTern === true && process.env.TERM_PROGRAM === "tern") return;
 		ctx.ui.setWidget(
 			"yuri-statusline",
 			(tui, widgetTheme) => {
