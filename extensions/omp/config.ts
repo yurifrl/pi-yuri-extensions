@@ -8,22 +8,27 @@ export const CONFIG_PATH = path.join(homedir(), ".omp", "agent", "extensions", "
 export function readOmpConfig(): YuriExtensionsConfig {
   if (!existsSync(CONFIG_PATH)) return DEFAULT_CONFIG;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-    if (typeof parsed !== "object" || parsed === null || !("modules" in parsed) || typeof parsed.modules !== "object" || parsed.modules === null) return DEFAULT_CONFIG;
-    const raw = parsed as Record<string, unknown>;
-    return {
-      modules: {
-        ...DEFAULT_CONFIG.modules,
-        ...(raw.modules as Record<string, unknown>),
-      },
-      budgetGates: raw.budgetGates as number[] | undefined,
-      ctxLimit: raw.ctxLimit as number | undefined,
-      ctxLimitAction: raw.ctxLimitAction as "compact" | "stop" | undefined,
-      statusline: migrateStatusline(raw.statusline as unknown),
-    };
+    return parseOmpConfig(readFileSync(CONFIG_PATH, "utf8"));
   } catch {
     return DEFAULT_CONFIG;
   }
+}
+
+/** Passes unknown fields through (pi reader parity): a whitelist here silently drops every
+ * new config field on read while writeOmpConfig persists it — ctxLimitRatio and
+ * continueAfterCompactPrompt both rotted this way. Only known shapes get normalized. */
+export function parseOmpConfig(text: string): YuriExtensionsConfig {
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== "object" || parsed === null || !("modules" in parsed) || typeof parsed.modules !== "object" || parsed.modules === null) return DEFAULT_CONFIG;
+  const raw = parsed as Record<string, unknown>;
+  return {
+    ...raw,
+    modules: {
+      ...DEFAULT_CONFIG.modules,
+      ...(raw.modules as Record<string, unknown>),
+    },
+    statusline: migrateStatusline(raw.statusline as unknown),
+  } as YuriExtensionsConfig;
 }
 
 /** Persist the full config (modules incl. per-module extras like notifications.events). */
